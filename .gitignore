@@ -1,0 +1,25 @@
+# This repository was initialized in a shared Python workspace. Ignore everything
+# by default and explicitly include only this project's files.
+/*
+!/.env.example
+!/.gitignore
+!/README.md
+!/pyproject.toml
+!/src/
+!/src/**
+!/tests/
+!/tests/**
+
+# Local and generated files inside included directories
+**/__pycache__/
+**/*.py[cod]
+**/.DS_Store
+/.env
+/.venv/
+/.pytest_cache/
+/.ruff_cache/
+/.coverage
+/htmlcov/
+/*.egg-info/
+/dist/
+/build/
