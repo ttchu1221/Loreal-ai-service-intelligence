@@ -34,4 +34,10 @@ pytest
 ```text
 src/loreal_ai_service_intelligence/  # 应用代码
 tests/                               # 自动化测试
+docs/                                # 详细项目文档
 ```
+
+## 开发规范
+
+仓库级开发要求见 [AGENTS.md](AGENTS.md)，版本变更记录见
+[CHANGELOG.md](CHANGELOG.md)，详细文档索引见 [docs/README.md](docs/README.md)。
