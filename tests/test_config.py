@@ -1,0 +1,17 @@
+from pathlib import Path
+
+from loreal_ai_service_intelligence.config import get_settings
+
+
+def test_loads_selected_environment_file(monkeypatch) -> None:
+    config_file = Path(__file__).parents[1] / "config" / "test.env"
+    monkeypatch.setenv("APP_CONFIG_FILE", str(config_file))
+    get_settings.cache_clear()
+
+    settings = get_settings()
+
+    assert settings.app_env == "test"
+    assert settings.app_port == 8001
+    assert settings.app_reload is False
+
+    get_settings.cache_clear()

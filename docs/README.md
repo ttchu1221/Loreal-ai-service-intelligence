@@ -1,16 +1,13 @@
-# Project Documentation
+# 项目文档
 
-Detailed project documentation belongs in this directory. Keep this index updated as
-documents are added.
+详细项目文档统一放在此目录，并在新增文档时维护本索引。
 
-## Suggested Documents
+## 当前文档
 
-- `architecture.md` — system boundaries, components, and important design decisions.
-- `api.md` — API contracts, examples, authentication, and error behavior.
-- `configuration.md` — environment variables and runtime configuration.
-- `development.md` — local workflows beyond the quick start in the root README.
-- `deployment.md` — deployment topology, operations, monitoring, and rollback.
-- `integrations/` — one document per external model provider or service.
-- `migrations/` — upgrade guidance for breaking changes.
+- [开发环境](development.md)：config、data、sandbox 和 scripts 的使用方式。
+- [Configuration](configuration.md)：environment variable、加载顺序与安全边界。
 
-Only create a document when its subject exists; avoid empty placeholder files.
+## 后续文档
+
+在对应能力实际存在时，再建立 `architecture.md`、`api.md`、`deployment.md`、`integrations/` 或
+`migrations/`，不要创建空 placeholder。

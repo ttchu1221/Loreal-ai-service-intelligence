@@ -7,8 +7,22 @@
 !/CHANGELOG.md
 !/README.md
 !/pyproject.toml
+!/config/
+!/config/**
+!/data/
+!/data/README.md
+!/data/raw/
+!/data/raw/.gitkeep
+!/data/interim/
+!/data/interim/.gitkeep
+!/data/processed/
+!/data/processed/.gitkeep
 !/docs/
 !/docs/**
+!/sandbox/
+!/sandbox/**
+!/scripts/
+!/scripts/**
 !/src/
 !/src/**
 !/tests/
@@ -27,3 +41,13 @@
 /*.egg-info/
 /dist/
 /build/
+
+# Runtime data must not be committed. Only the directory structure is tracked.
+/data/raw/**
+!/data/raw/.gitkeep
+/data/interim/**
+!/data/interim/.gitkeep
+/data/processed/**
+!/data/processed/.gitkeep
+/sandbox/output/**
+!/sandbox/output/.gitkeep

@@ -33,6 +33,13 @@
 
 - application code 放在 `src/loreal_ai_service_intelligence/` 下。
 - test 放在 `tests/` 下，并在可行时对应 source structure。
+- 各 environment 的非敏感默认值放在 `config/`；secret 只能由 `.env` 或 runtime environment
+  提供。
+- 本地数据按 `data/raw`、`data/interim`、`data/processed` 分层，实际数据文件不得 commit。
+- prototype 和一次性实验放在 `sandbox/`；稳定逻辑必须迁入 `src/`，production code 不得
+  import `sandbox/`。
+- 可重复使用的开发 command 放在 `scripts/`，shell script 必须使用 strict mode、引用所有
+  variable、校验 input，并保证重复执行安全。
 - API route 保持精简；business logic 放入职责单一、interface 清晰的 module。
 - public function 和不易理解的 internal function 必须使用 type hint。
 - 优先使用明确的 data model 和 dependency injection，避免 global mutable state。

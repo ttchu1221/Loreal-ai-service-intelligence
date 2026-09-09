@@ -11,6 +11,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 - Added repository-wide development instructions and documentation conventions.
 - Added the initial FastAPI service skeleton and health endpoint.
+- 新增 development、test 和 production 的 config 模板与类型化 runtime settings。
+- 新增本地 sandbox、data 分层和可重复执行的开发 scripts。
+- 新增 config 与本地开发流程文档。
 
 ### Changed
 
