@@ -12,6 +12,11 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Added repository-wide development instructions and documentation conventions.
 - Added the initial FastAPI service skeleton and health endpoint.
 
+### Changed
+
+- Defined Chinese as the default language for non-technical communication while keeping
+  established technical terms in English.
+
 ## [0.1.0] - 2026-09-09
 
 ### Added
