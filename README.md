@@ -10,6 +10,7 @@
 
 ```bash
 scripts/bootstrap.sh
+scripts/mongo-dev.sh  # 在独立 terminal 启动 MongoDB
 scripts/dev.sh
 ```
 
@@ -17,6 +18,10 @@ scripts/dev.sh
 
 - 健康检查：<http://127.0.0.1:8000/health>
 - API 文档：<http://127.0.0.1:8000/docs>
+
+比赛 MVP 已提供消费者咨询、人工接管和品牌洞察 backend API。契约与演示边界见
+[比赛 MVP API](docs/api.md)，实现结构见
+[比赛 MVP Backend Architecture](docs/architecture.md)。
 
 ## 质量检查
 

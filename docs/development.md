@@ -17,6 +17,14 @@ PYTHON_BIN=python3.11 scripts/bootstrap.sh
 
 ## 启动服务
 
+先启动本地 MongoDB：
+
+```bash
+scripts/mongo-dev.sh
+```
+
+再启动 API：
+
 ```bash
 scripts/dev.sh
 ```

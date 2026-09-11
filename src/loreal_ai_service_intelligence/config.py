@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os
 from functools import lru_cache
 from pathlib import Path
@@ -14,6 +16,14 @@ class Settings(BaseSettings):
     app_port: int = 8000
     app_reload: bool = False
     data_dir: Path = Path("data")
+    mongodb_uri: str = "mongodb://127.0.0.1:27017"
+    mongodb_database: str = "loreal_ai_service_intelligence"
+    mongodb_timeout_ms: int = 3000
+    rule_version: str = "risk-rules-v1"
+    knowledge_version: str = "demo-knowledge-v1"
+    schema_version: str = "1.0"
+    handoff_eta_minutes: int = 30
+    intent_minimum_confidence: float = 0.7
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
