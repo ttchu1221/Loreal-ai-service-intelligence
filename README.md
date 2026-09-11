@@ -1,6 +1,8 @@
 # L'Oréal AI Service Intelligence
 
-面向智能服务场景的 Python API 项目基础骨架。
+面向美妆消费者咨询、风险识别、人工接管和服务洞察的 AI service intelligence backend。
+当前实现采用 FastAPI、MongoDB、可替换的 `IntentProvider`/`KnowledgeProvider` 和确定性安全
+fallback，可在没有外部 LLM 的情况下运行完整演示流程。
 
 ## 环境要求
 
@@ -19,7 +21,19 @@ scripts/dev.sh
 - 健康检查：<http://127.0.0.1:8000/health>
 - API 文档：<http://127.0.0.1:8000/docs>
 
-比赛 MVP 已提供消费者咨询、人工接管和品牌洞察 backend API。契约与演示边界见
+## 已实现能力
+
+- 消费者多轮咨询及 `RESOLVE`、`ASK`、`HANDOFF`、`BLOCK` 四状态编排。
+- 当前消息优先的风险识别，支持常见否定、假设、第三方主体和已恢复表达。
+- 可注入的 LLM 意图识别边界，以及 timeout、非法输出和低置信度 fallback。
+- 可注入的 RAG/知识库边界，以及知识可回答性过滤和可追踪 evidence。
+- MongoDB 会话、审计、反馈、幂等人工事件和客服动作持久化。
+- 人工客服视图、事件队列和基础品牌洞察 API。
+
+当前附件只进行 metadata 校验；系统会明确告知无法读取内容并建议转人工。订单系统、真实文件
+存储、登录鉴权和 webhook 等 external integration 尚未选型，不会在演示中伪造已接入状态。
+
+完整 API contract 与演示边界见
 [比赛 MVP API](docs/api.md)，实现结构见
 [比赛 MVP Backend Architecture](docs/architecture.md)。
 
@@ -48,3 +62,10 @@ scripts/                             # 开发与验证脚本
 
 config、data、sandbox 和 scripts 的完整说明见
 [开发环境文档](docs/development.md)。
+
+## 当前边界
+
+内置规则与知识仅用于 deterministic demo，不代表 production 模型效果、真实商品知识或正式客服
+SLA。上线前仍需接入真实 LLM/RAG、认证与 RBAC、文件处理、订单/售后系统、通知 webhook、分页、
+事件认领和并发控制；具体风险和接入顺序见
+[Backend Architecture](docs/architecture.md#production-接入路线)。

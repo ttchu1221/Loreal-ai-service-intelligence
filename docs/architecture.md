@@ -5,6 +5,33 @@
 `InMemoryKnowledgeBase` 提供可替换的审核知识检索；`MongoRepository` 保存会话、审计、服务事件、
 人工动作和反馈。
 
+## 当前请求链路
+
+```text
+HTTP request
+    │
+    ▼
+FastAPI typed validation
+    │
+    ▼
+ConversationOrchestrator
+    ├── 附件能力检查 ───────────────► HANDOFF（未接文件 provider）
+    ├── 当前消息安全规则 ───────────► BLOCK
+    ├── 必要信息检查 ───────────────► ASK
+    ├── IntentProvider + fallback
+    └── KnowledgeProvider + answerability
+            ├── 有审核依据 ─────────► RESOLVE
+            └── 无可靠依据 ─────────► HANDOFF
+    │
+    ▼
+StorageRepository
+    ├── MongoRepository（runtime）
+    └── MemoryRepository（test）
+```
+
+route 只负责 HTTP contract，状态判断、文案选择和审计数据生成位于 orchestrator；provider output
+必须经过 Pydantic model 校验，不能直接控制持久化或执行客服动作。
+
 当前实现使用 rule-based 理解和小型内置演示知识库，保证三条验收案例离线、可复现。它不是生产
 模型效果声明，也不是真实商品知识。后续接入千问或其他 provider 时，应把结构化理解封装在独立
 interface 后，强制使用 `EmpathyCard` 校验 model output，并为 timeout、空输出和非法 Schema 保留
@@ -32,3 +59,20 @@ MongoDB 使用 `conversations`、`audit_events`、`service_events`、`feedback` 
 生产 deployment 仍需配置认证、TLS、备份和最小权限账号，并在 API 前增加身份认证、角色授权、
 rate limit 和正式审计主体。当前审计主体标记为 `unauthenticated_agent_api`，用于明确暴露鉴权尚未
 接入，而不是伪装成真实客服身份；配置化响应时间也不得作为未经运营确认的真实客服承诺。
+
+## Production 接入路线
+
+建议按依赖关系推进，而不是先绑定尚未确定的 vendor：
+
+1. 扩展结构化理解结果，加入 entities、missing slots、multi-intent 和 answerability，并用真实语料
+   建立 regression evaluation。
+2. 实现 LLM `IntentProvider` 与 RAG `KnowledgeProvider`，保留现有 rule fallback、Schema 校验、
+   timeout 和安全守卫。
+3. 确定文件存储后，实现 `FileProvider`，再接图片识别与语音转文字；在此之前附件继续显式转人工。
+4. 确定订单/售后服务后，通过 integration adapter 接入，不把 vendor-specific payload 泄漏到
+   conversation domain model。
+5. 接入 JWT 或企业 SSO/OIDC，并据此实现 RBAC、真实 audit actor、事件认领和数据访问范围。
+6. 增加分页、optimistic locking、claim lease、retry/outbox，再连接消息或客服 webhook。
+
+订单/售后、文件存储、鉴权和通知服务尚未选型；因此当前没有写死 vendor endpoint、credential 或
+第三方 SDK。
