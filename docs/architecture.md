@@ -20,7 +20,8 @@ ConversationOrchestrator
     ├── 必要信息检查 ───────────────► ASK
     ├── IntentProvider + fallback
     └── KnowledgeProvider + answerability
-            ├── 有审核依据 ─────────► RESOLVE
+            ├── 搓泥且有审核依据 ───► GUIDE
+            ├── 其他有审核依据 ─────► RESOLVE（兼容状态）
             └── 无可靠依据 ─────────► HANDOFF
     │
     ▼
@@ -28,6 +29,10 @@ StorageRepository
     ├── MongoRepository（runtime）
     └── MemoryRepository（test）
 ```
+
+每个会话内保存一个带 revision history 的 `CaseRecord`、多个 `AttemptRecord` 和一个可选
+`TicketRecord`。Case 更正不会覆盖原始事实；Attempt 将建议、执行状态、观察和结果拆开；Ticket 将
+人工回复、动作完成、用户确认解决和重开拆成带版本事件，从而避免把客服动作完成误报成用户问题已解决。
 
 route 只负责 HTTP contract，状态判断、文案选择和审计数据生成位于 orchestrator；provider output
 必须经过 Pydantic model 校验，不能直接控制持久化或执行客服动作。

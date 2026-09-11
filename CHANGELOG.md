@@ -21,6 +21,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - 新增 MongoDB 本地启动脚本、collection/index 文档和 database unavailable 安全降级。
 - 新增可注入的 `IntentProvider` 和规则 fallback；外部模型异常、非法输出或低置信度时自动降级，高风险安全规则始终优先执行。
 - 新增可注入的 `KnowledgeProvider` interface，为后续真实 RAG provider 保留稳定边界。
+- 新增底妆搓泥 `GUIDE` 短链路、可更正 Case、独立 Attempt 执行记录和带版本 Ticket 结果事件。
+- 新增消费者与人工客服最小 web workspace，以及部署恢复说明。
+- 新增非 root container deployment package、health check 和 secret/data 排除规则。
 
 ### Changed
 
@@ -30,6 +33,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - 回复会按意图选择文案；未接入文件处理时明确告知附件不可读取，非风险转人工拒绝不再显示医疗提示。
 - 更新 README、API 和 architecture 文档，补充当前能力、请求链路、external integration 边界及
   production 分阶段接入路线，并修正过时的客服审计主体描述。
+- 人工回复、动作完成、用户确认解决和重开改为独立 Ticket 事件，避免虚假完成。
 
 ### Fixed
 

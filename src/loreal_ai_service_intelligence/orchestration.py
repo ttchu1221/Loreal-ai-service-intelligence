@@ -13,6 +13,12 @@ from loreal_ai_service_intelligence.intent import (
 from loreal_ai_service_intelligence.knowledge import InMemoryKnowledgeBase, KnowledgeProvider
 from loreal_ai_service_intelligence.models import (
     AgentConversationView,
+    AttemptCreateRequest,
+    AttemptRecord,
+    AttemptUpdateRequest,
+    CaseRecord,
+    CaseRevision,
+    CaseRevisionRequest,
     ConsumerResponse,
     ConversationRequest,
     ConversationState,
@@ -22,6 +28,8 @@ from loreal_ai_service_intelligence.models import (
     Intent,
     RiskLevel,
     StoredConversation,
+    TicketRecord,
+    TicketResultRequest,
 )
 from loreal_ai_service_intelligence.repository import StorageRepository, utc_now
 
@@ -78,7 +86,10 @@ class ConversationOrchestrator:
             empathy_card=card,
             last_result_id=result_id,
             unresolved_attempts=(existing.unresolved_attempts if existing else 0)
-            + int(card.next_state != ConversationState.RESOLVE),
+            + int(card.next_state not in {ConversationState.RESOLVE, ConversationState.GUIDE}),
+            case=existing.case if existing else self._initial_case(conversation_id, request),
+            attempts=list(existing.attempts) if existing else [],
+            ticket=existing.ticket if existing else None,
             created_at=existing.created_at if existing else now,
             updated_at=now,
         )
@@ -100,7 +111,11 @@ class ConversationOrchestrator:
             result_id=result_id,
             state=card.next_state,
             message=response_text,
-            evidence=card.knowledge_refs if card.next_state == ConversationState.RESOLVE else [],
+            evidence=(
+                card.knowledge_refs
+                if card.next_state in {ConversationState.RESOLVE, ConversationState.GUIDE}
+                else []
+            ),
             available_actions=actions,
         )
 
@@ -140,6 +155,14 @@ class ConversationOrchestrator:
             intent = Intent.COMPLAINT
             intent_confidence = 1.0
             intent_source = "safety_rules"
+        elif self._needs_pilling_details(text, existing):
+            state = ConversationState.ASK
+            risk = RiskLevel.LOW
+            missing = ["搓泥发生步骤或已经尝试过的方法"]
+            refs = []
+            intent = Intent.USAGE
+            intent_confidence = 1.0
+            intent_source = "pilling_clarification_rules"
         elif self._needs_shade_details(text, existing):
             state = ConversationState.ASK
             risk = RiskLevel.LOW
@@ -162,13 +185,22 @@ class ConversationOrchestrator:
                 intent = intent_result.intent
                 intent_confidence = intent_result.confidence
                 intent_source = intent_result.source
-            refs = self.knowledge.search(text, intent)
+            if self._is_pilling_context(text, existing) and existing:
+                refs = self.knowledge.search(
+                    f"{existing.case.original_statement} {text}", Intent.USAGE
+                )
+            else:
+                refs = self.knowledge.search(text, intent)
             if not refs and existing and existing.empathy_card.intent == Intent.PURCHASE:
                 context_query = f"{existing.empathy_card.surface_issue} {text}"
                 refs = self.knowledge.search(context_query, Intent.PURCHASE)
             missing = []
             risk = RiskLevel.LOW
-            state = ConversationState.RESOLVE if refs else ConversationState.HANDOFF
+            state = (
+                ConversationState.GUIDE
+                if refs and self._is_pilling_context(text, existing)
+                else (ConversationState.RESOLVE if refs else ConversationState.HANDOFF)
+            )
 
         return EmpathyCard(
             conversation_id=conversation_id,
@@ -197,6 +229,15 @@ class ConversationOrchestrator:
                 ["confirm_handoff", "decline_handoff"],
             )
         if card.next_state == ConversationState.ASK:
+            if "搓泥发生步骤或已经尝试过的方法" in card.missing_information:
+                return (
+                    "为了只调整一个条件，请告诉我搓泥发生在哪一步，以及你已经试过什么方法；不确定也可以跳过。",
+                    [
+                        "reply",
+                        "skip",
+                        "confirm_handoff",
+                    ],
+                )
             return "为了更准确地给出建议，请告诉我你的肤色冷暖调，或你偏好的妆效。", ["reply"]
         if card.next_state == ConversationState.HANDOFF:
             if "可读取的附件内容" in card.missing_information:
@@ -223,6 +264,144 @@ class ConversationOrchestrator:
             "feedback",
             "new_question",
         ]
+
+    @staticmethod
+    def _initial_case(conversation_id: str, request: ConversationRequest) -> CaseRecord:
+        now = utc_now()
+        facts = {"product": request.product} if request.product else {}
+        revision = CaseRevision(
+            revision=1,
+            facts=facts,
+            unknown_fields=["product"] if not request.product else [],
+            reason="initial_statement",
+            created_at=now,
+        )
+        return CaseRecord(
+            case_id=f"case_{uuid4().hex}",
+            conversation_id=conversation_id,
+            original_statement=request.message,
+            revisions=[revision],
+        )
+
+    @staticmethod
+    def _is_pilling_context(text: str, existing: StoredConversation | None) -> bool:
+        return any(term in text for term in ("搓泥", "起屑", "结块")) or bool(
+            existing
+            and any(term in existing.case.original_statement for term in ("搓泥", "起屑", "结块"))
+        )
+
+    def _needs_pilling_details(self, text: str, existing: StoredConversation | None) -> bool:
+        if not self._is_pilling_context(text, existing) or existing is not None:
+            return False
+        detail_terms = ("防晒后", "护肤后", "妆前后", "试过", "减少", "等待", "发生在")
+        return not any(term in text for term in detail_terms)
+
+    def revise_case(self, conversation_id: str, request: CaseRevisionRequest) -> CaseRecord | None:
+        conversation = self.repository.get_conversation(conversation_id)
+        if conversation is None or conversation.case is None:
+            return None
+        previous = conversation.case.revisions[-1]
+        revision = CaseRevision(
+            revision=conversation.case.current_revision + 1,
+            facts={**previous.facts, **request.facts},
+            unknown_fields=request.unknown_fields,
+            reason=request.reason,
+            created_at=utc_now(),
+        )
+        conversation.case.revisions.append(revision)
+        conversation.case.current_revision = revision.revision
+        conversation.updated_at = utc_now()
+        self.repository.save_conversation(conversation)
+        self.repository.add_audit(
+            conversation_id,
+            "case_revised",
+            {"revision": revision.revision, "reason": request.reason},
+        )
+        return conversation.case
+
+    def create_attempt(
+        self, conversation_id: str, request: AttemptCreateRequest
+    ) -> AttemptRecord | None:
+        conversation = self.repository.get_conversation(conversation_id)
+        if conversation is None:
+            return None
+        normalized = "".join(request.recommendation.lower().split())
+        if any(
+            "".join(item.recommendation.lower().split()) == normalized
+            for item in conversation.attempts
+        ):
+            raise ValueError("duplicate attempt")
+        now = utc_now()
+        attempt = AttemptRecord(
+            attempt_id=f"attempt_{uuid4().hex}",
+            conversation_id=conversation_id,
+            created_at=now,
+            updated_at=now,
+            **request.model_dump(),
+        )
+        conversation.attempts.append(attempt)
+        conversation.updated_at = now
+        self.repository.save_conversation(conversation)
+        self.repository.add_audit(
+            conversation_id, "attempt_proposed", {"attempt_id": attempt.attempt_id}
+        )
+        return attempt
+
+    def update_attempt(
+        self, conversation_id: str, attempt_id: str, request: AttemptUpdateRequest
+    ) -> AttemptRecord | None:
+        conversation = self.repository.get_conversation(conversation_id)
+        if conversation is None:
+            return None
+        attempt = next(
+            (item for item in conversation.attempts if item.attempt_id == attempt_id), None
+        )
+        if attempt is None:
+            return None
+        if request.execution_status == "executed" and not request.observation:
+            raise ValueError("observation is required when an attempt was executed")
+        attempt.execution_status = request.execution_status
+        attempt.observation = request.observation
+        attempt.outcome = request.outcome or (
+            "unknown" if request.execution_status == "skipped" else None
+        )
+        attempt.updated_at = utc_now()
+        conversation.updated_at = attempt.updated_at
+        self.repository.save_conversation(conversation)
+        self.repository.add_audit(
+            conversation_id,
+            "attempt_updated",
+            {"attempt_id": attempt_id, "execution_status": request.execution_status},
+        )
+        return attempt
+
+    def record_ticket_result(
+        self, conversation_id: str, request: TicketResultRequest
+    ) -> TicketRecord | None:
+        conversation = self.repository.get_conversation(conversation_id)
+        if conversation is None or conversation.ticket is None:
+            return None
+        status_map = {
+            "agent_replied": "agent_replied",
+            "action_completed": "action_completed",
+            "user_confirmed_resolved": "resolved",
+            "reopened": "reopened",
+        }
+        now = utc_now()
+        conversation.ticket.status = status_map[request.event]
+        conversation.ticket.version += 1
+        conversation.ticket.updated_at = now
+        conversation.ticket.result_events.append(
+            {"event": request.event, "note": request.note, "created_at": now.isoformat()}
+        )
+        conversation.updated_at = now
+        self.repository.save_conversation(conversation)
+        self.repository.add_audit(
+            conversation_id,
+            "ticket_result",
+            {"event": request.event, "ticket_version": conversation.ticket.version},
+        )
+        return conversation.ticket
 
     @staticmethod
     def _active_risk_terms(text: str) -> list[str]:
@@ -302,6 +481,15 @@ class ConversationOrchestrator:
         conversation.state = ConversationState.HANDOFF
         conversation.empathy_card.next_state = ConversationState.HANDOFF
         conversation.updated_at = utc_now()
+        if conversation.ticket is None:
+            now = utc_now()
+            conversation.ticket = TicketRecord(
+                ticket_id=str(event["event_id"]),
+                conversation_id=conversation_id,
+                status="waiting_for_agent",
+                created_at=now,
+                updated_at=now,
+            )
         self.repository.save_conversation(conversation)
         self.repository.add_audit(
             conversation_id,
@@ -349,6 +537,7 @@ class ConversationOrchestrator:
             schema_version=self.settings.schema_version,
             rule_version=self.settings.rule_version,
             knowledge_version=self.settings.knowledge_version,
+            ticket=conversation.ticket,
         )
         return AgentConversationView(
             handoff_package=package,

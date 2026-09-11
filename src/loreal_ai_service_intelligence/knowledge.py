@@ -36,6 +36,12 @@ class InMemoryKnowledgeBase:
                 "选择底妆色号时应结合肤色深浅、冷暖调与期望妆效，并优先线下试色。",
                 "比赛演示知识库：底妆选购指引",
             ),
+            KnowledgeItem(
+                "KB-PILLING-001",
+                ("搓泥", "起屑", "结块"),
+                "先只调整一个条件：减少底妆前护肤品用量，并等待成膜后再薄涂底妆；观察同一区域是否仍出现起屑或结块，无改善或出现不适时停止尝试并转人工。",
+                "比赛演示知识库：底妆搓泥排查指引",
+            ),
         )
 
     def search(
@@ -53,6 +59,8 @@ class InMemoryKnowledgeBase:
             for item in self._items
             if any(keyword.lower() in normalized for keyword in item.keywords)
         ]
+        if any(term in normalized for term in ("搓泥", "起屑", "结块")):
+            ranked.sort(key=lambda item: item.knowledge_id != "KB-PILLING-001")
         return [
             KnowledgeReference(
                 knowledge_id=item.knowledge_id,

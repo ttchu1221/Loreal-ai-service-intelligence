@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Literal, Optional, Union
 
 from fastapi import FastAPI, HTTPException, Query, Request, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from pymongo.errors import PyMongoError
 
 from loreal_ai_service_intelligence import __version__
@@ -12,6 +12,11 @@ from loreal_ai_service_intelligence.intent import IntentProvider
 from loreal_ai_service_intelligence.knowledge import KnowledgeProvider
 from loreal_ai_service_intelligence.models import (
     AgentConversationView,
+    AttemptCreateRequest,
+    AttemptRecord,
+    AttemptUpdateRequest,
+    CaseRecord,
+    CaseRevisionRequest,
     ConsumerResponse,
     ConversationRequest,
     EventSummary,
@@ -20,6 +25,8 @@ from loreal_ai_service_intelligence.models import (
     InsightMetric,
     InsightsResponse,
     ServiceActionRequest,
+    TicketRecord,
+    TicketResultRequest,
 )
 from loreal_ai_service_intelligence.orchestration import ConversationOrchestrator
 from loreal_ai_service_intelligence.repository import MongoRepository, StorageRepository
@@ -73,6 +80,68 @@ def create_app(
         if response is None:
             raise HTTPException(status_code=404, detail="conversation not found")
         return response
+
+    @application.get(
+        "/v1/conversations/{conversation_id}/case", response_model=CaseRecord, tags=["consumer"]
+    )
+    def get_case(conversation_id: str) -> CaseRecord:
+        conversation = repository.get_conversation(conversation_id)
+        if conversation is None or conversation.case is None:
+            raise HTTPException(status_code=404, detail="case not found")
+        return conversation.case
+
+    @application.post(
+        "/v1/conversations/{conversation_id}/case/revisions",
+        response_model=CaseRecord,
+        tags=["consumer"],
+    )
+    def revise_case(conversation_id: str, request: CaseRevisionRequest) -> CaseRecord:
+        case = orchestrator.revise_case(conversation_id, request)
+        if case is None:
+            raise HTTPException(status_code=404, detail="case not found")
+        return case
+
+    @application.get(
+        "/v1/conversations/{conversation_id}/attempts",
+        response_model=list[AttemptRecord],
+        tags=["consumer"],
+    )
+    def list_attempts(conversation_id: str) -> list[AttemptRecord]:
+        conversation = repository.get_conversation(conversation_id)
+        if conversation is None:
+            raise HTTPException(status_code=404, detail="conversation not found")
+        return conversation.attempts
+
+    @application.post(
+        "/v1/conversations/{conversation_id}/attempts",
+        response_model=AttemptRecord,
+        status_code=status.HTTP_201_CREATED,
+        tags=["consumer"],
+    )
+    def create_attempt(conversation_id: str, request: AttemptCreateRequest) -> AttemptRecord:
+        try:
+            attempt = orchestrator.create_attempt(conversation_id, request)
+        except ValueError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        if attempt is None:
+            raise HTTPException(status_code=404, detail="conversation not found")
+        return attempt
+
+    @application.patch(
+        "/v1/conversations/{conversation_id}/attempts/{attempt_id}",
+        response_model=AttemptRecord,
+        tags=["consumer"],
+    )
+    def update_attempt(
+        conversation_id: str, attempt_id: str, request: AttemptUpdateRequest
+    ) -> AttemptRecord:
+        try:
+            attempt = orchestrator.update_attempt(conversation_id, attempt_id, request)
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        if attempt is None:
+            raise HTTPException(status_code=404, detail="attempt not found")
+        return attempt
 
     @application.post(
         "/v1/conversations/{conversation_id}/handoff",
@@ -169,9 +238,38 @@ def create_app(
                 "actor": "unauthenticated_agent_api",
             },
         )
+        ticket_event = {
+            "reply": "agent_replied",
+            "create_after_sales": "action_completed",
+            "close": "action_completed",
+        }.get(request.action)
+        if ticket_event:
+            orchestrator.record_ticket_result(
+                str(event["conversation_id"]),
+                TicketResultRequest(event=ticket_event, note=request.parameters.get("note")),
+            )
         updated = repository.get_event(event_id)
         assert updated is not None
         return orchestrator._event_summary(updated)
+
+    @application.post(
+        "/v1/agent/conversations/{conversation_id}/ticket/results",
+        response_model=TicketRecord,
+        tags=["agent"],
+    )
+    def record_ticket_result(conversation_id: str, request: TicketResultRequest) -> TicketRecord:
+        ticket = orchestrator.record_ticket_result(conversation_id, request)
+        if ticket is None:
+            raise HTTPException(status_code=404, detail="ticket not found")
+        return ticket
+
+    @application.get("/workspace/consumer", response_class=HTMLResponse, tags=["workspace"])
+    def consumer_workspace() -> str:
+        return _consumer_workspace_html()
+
+    @application.get("/workspace/agent", response_class=HTMLResponse, tags=["workspace"])
+    def agent_workspace() -> str:
+        return _agent_workspace_html()
 
     @application.get("/v1/insights/overview", response_model=InsightsResponse, tags=["brand"])
     def get_insights(
@@ -221,3 +319,34 @@ def create_app(
 
 
 app = create_app()
+
+
+def _consumer_workspace_html() -> str:
+    return """<!doctype html><html lang="zh-CN"><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>消费者服务工作区</title><style>
+body{font:16px system-ui;max-width:760px;margin:3rem auto;padding:0 1rem}
+textarea,input,button{font:inherit;padding:.7rem;margin:.35rem 0;width:100%}
+button{width:auto}.result{white-space:pre-wrap;background:#f5f5f5;padding:1rem}</style>
+<h1>底妆搓泥排查</h1><p>每次只补充一个必要信息，并只调整一个条件。你也可以随时转人工。</p>
+<input id="product" placeholder="产品名称（可选）">
+<textarea id="message" rows="5" placeholder="描述问题和已经尝试的方法"></textarea>
+<button onclick="send()">开始排查</button><div id="result" class="result" aria-live="polite"></div>
+<script>async function send(){
+const payload={message:message.value,product:product.value||null};
+const r=await fetch('/v1/conversations',{method:'POST',
+headers:{'content-type':'application/json'},body:JSON.stringify(payload)});
+const b=await r.json();result.textContent=b.message||b.detail;}</script></html>"""
+
+
+def _agent_workspace_html() -> str:
+    return """<!doctype html><html lang="zh-CN"><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>人工客服工作台</title>
+<style>body{font:16px system-ui;max-width:900px;margin:3rem auto;padding:0 1rem}
+li{padding:.6rem;border-bottom:1px solid #ddd}</style>
+<h1>人工客服工作台</h1><p>队列按风险优先级和等待时间排列。回复、动作完成与用户确认解决分别记录。</p>
+<button onclick="load()">刷新队列</button><ol id="events" aria-live="polite"></ol>
+<script>async function load(){const r=await fetch('/v1/agent/events');
+const b=await r.json();events.innerHTML=b.map(x=>
+`<li><b>${x.status}</b> ${x.reason} <small>${x.event_id}</small></li>`
+).join('')}</script></html>"""

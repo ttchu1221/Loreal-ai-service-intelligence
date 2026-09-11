@@ -10,6 +10,7 @@
 - [比赛 MVP Backend Architecture](architecture.md)：请求链路、状态机、持久化、provider 边界和
   production 接入路线。
 - [MongoDB](mongodb.md)：本地启动、collection、index 与 production 安全要求。
+- [部署与恢复](deployment.md)：启动检查、稳定版本、恢复和降级边界。
 
 ## 后续文档
 

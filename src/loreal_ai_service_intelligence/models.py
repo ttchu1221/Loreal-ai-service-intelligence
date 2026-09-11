@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class ConversationState(str, Enum):
+    GUIDE = "GUIDE"
     RESOLVE = "RESOLVE"
     ASK = "ASK"
     HANDOFF = "HANDOFF"
@@ -113,6 +114,74 @@ class ServiceActionRequest(BaseModel):
     parameters: dict[str, Any] = Field(default_factory=dict)
 
 
+class CaseRevisionRequest(BaseModel):
+    facts: dict[str, str] = Field(default_factory=dict)
+    unknown_fields: list[str] = Field(default_factory=list)
+    reason: str = Field(min_length=1, max_length=300)
+
+
+class CaseRevision(BaseModel):
+    revision: int
+    facts: dict[str, str] = Field(default_factory=dict)
+    unknown_fields: list[str] = Field(default_factory=list)
+    reason: str
+    created_at: datetime
+
+
+class CaseRecord(BaseModel):
+    case_id: str
+    conversation_id: str
+    original_statement: str
+    current_revision: int = 1
+    revisions: list[CaseRevision] = Field(default_factory=list)
+
+
+class AttemptCreateRequest(BaseModel):
+    recommendation: str = Field(min_length=1, max_length=1000)
+    purpose: str = Field(min_length=1, max_length=500)
+    instructions: str = Field(min_length=1, max_length=1000)
+    observation_target: str = Field(min_length=1, max_length=500)
+    exit_condition: str = Field(min_length=1, max_length=500)
+
+
+class AttemptUpdateRequest(BaseModel):
+    execution_status: Literal["executed", "skipped"]
+    observation: Optional[str] = Field(default=None, max_length=1000)
+    outcome: Optional[Literal["improved", "unchanged", "worse", "unknown"]] = None
+
+
+class AttemptRecord(BaseModel):
+    attempt_id: str
+    conversation_id: str
+    recommendation: str
+    purpose: str
+    instructions: str
+    observation_target: str
+    exit_condition: str
+    execution_status: Literal["proposed", "executed", "skipped"] = "proposed"
+    observation: Optional[str] = None
+    outcome: Optional[Literal["improved", "unchanged", "worse", "unknown"]] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class TicketResultRequest(BaseModel):
+    event: Literal["agent_replied", "action_completed", "user_confirmed_resolved", "reopened"]
+    note: Optional[str] = Field(default=None, max_length=1000)
+
+
+class TicketRecord(BaseModel):
+    ticket_id: str
+    conversation_id: str
+    status: Literal[
+        "waiting_for_agent", "agent_replied", "action_completed", "resolved", "reopened"
+    ]
+    version: int = 1
+    result_events: list[dict[str, Any]] = Field(default_factory=list)
+    created_at: datetime
+    updated_at: datetime
+
+
 class EventSummary(BaseModel):
     event_id: str
     conversation_id: str
@@ -140,6 +209,7 @@ class HandoffPackage(BaseModel):
     schema_version: str
     rule_version: str
     knowledge_version: str
+    ticket: Optional[TicketRecord] = None
 
 
 class AgentConversationView(BaseModel):
@@ -173,5 +243,8 @@ class StoredConversation(BaseModel):
     empathy_card: EmpathyCard
     last_result_id: str
     unresolved_attempts: int = 0
+    case: Optional[CaseRecord] = None
+    attempts: list[AttemptRecord] = Field(default_factory=list)
+    ticket: Optional[TicketRecord] = None
     created_at: datetime
     updated_at: datetime

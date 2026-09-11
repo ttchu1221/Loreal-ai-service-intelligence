@@ -2,9 +2,11 @@
 # by default and explicitly include only this project's files.
 /*
 !/.env.example
+!/.dockerignore
 !/.gitignore
 !/AGENTS.md
 !/CHANGELOG.md
+!/Dockerfile
 !/README.md
 !/pyproject.toml
 !/config/

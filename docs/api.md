@@ -20,7 +20,8 @@
 ```
 
 response 只包含消费者可见的自然语言、状态、依据与可执行动作，不暴露情绪标签、内部风险规则、
-模型名称或推理过程。`RESOLVE` 返回审核知识依据；`ASK` 每轮只问一个关键问题；无审核依据时显式
+模型名称或推理过程。底妆搓泥场景的 `GUIDE` 和兼容既有咨询的 `RESOLVE` 返回审核知识依据；
+`ASK` 每轮只问一个关键问题；无审核依据时显式
 进入 `HANDOFF`；命中高风险症状时进入 `BLOCK`，停止产品推荐并保留安全提醒。
 
 每轮风险与意图判断以当前 `message` 为主，历史消息用于保存事实和补充必要的选购上下文，不会把
@@ -30,6 +31,16 @@ response 只包含消费者可见的自然语言、状态、依据与可执行�
 附件字段当前只校验 `product_image` 或 `order_screenshot` metadata，属于后续文件 provider 的预留入口。
 收到附件时 API 会明确告知无法读取内容并请求转人工，不执行
 真实图片识别，也不保存文件内容。
+
+### Case 和 Attempt
+
+- `GET /v1/conversations/{conversation_id}/case`：读取消费者原话、当前事实版本和全部修订历史。
+- `POST /v1/conversations/{conversation_id}/case/revisions`：追加更正版本，不覆盖历史版本。
+- `GET /v1/conversations/{conversation_id}/attempts`：读取建议及执行历史。
+- `POST /v1/conversations/{conversation_id}/attempts`：记录一个包含目的、操作、观察点和退出条件的
+  单条件建议；相同建议返回 `409`，防止重复尝试。
+- `PATCH /v1/conversations/{conversation_id}/attempts/{attempt_id}`：分别记录执行或跳过、观察内容
+  和结果；执行过的建议没有观察内容时返回 `422`。
 
 ### 人工交接和反馈
 
@@ -46,6 +57,11 @@ response 只包含消费者可见的自然语言、状态、依据与可执行�
   信息、风险、知识依据、建议下一步和审计轨迹。
 - `POST /v1/agent/events/{event_id}/actions`：记录回复、索要材料、建立售后记录、升级专家或关闭
   事件。鉴权接入前审计主体明确记录为 `unauthenticated_agent_api`；生产环境必须用认证身份替换。
+- `POST /v1/agent/conversations/{conversation_id}/ticket/results`：分别记录人工回复、动作完成、
+  用户确认解决或重开；这些结果不会相互冒充。
+
+`GET /workspace/consumer` 和 `GET /workspace/agent` 提供无额外 frontend dependency 的最小可运行
+工作区，用于联调消费者输入和人工队列。它们不包含 production 登录能力。
 
 ## 品牌洞察
 
@@ -54,7 +70,7 @@ response 只包含消费者可见的自然语言、状态、依据与可执行�
 
 ## 状态和版本
 
-全局状态为 `RESOLVE`、`ASK`、`HANDOFF` 和 `BLOCK`。MongoDB 持久化保存状态切换原因、规则版本、
+全局状态为 `GUIDE`、`RESOLVE`、`ASK`、`HANDOFF` 和 `BLOCK`。MongoDB 持久化保存状态切换原因、规则版本、
 知识版本、结果编号、人工动作和反馈。当前版本由 `SCHEMA_VERSION`、`RULE_VERSION` 和
 `KNOWLEDGE_VERSION` 配置。
 
