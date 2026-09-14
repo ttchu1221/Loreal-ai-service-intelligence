@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     schema_version: str = "1.0"
     handoff_eta_minutes: int = 30
     intent_minimum_confidence: float = 0.7
+    mock_api_enabled: bool = True
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 

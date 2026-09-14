@@ -24,6 +24,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - 新增底妆搓泥 `GUIDE` 短链路、可更正 Case、独立 Attempt 执行记录和带版本 Ticket 结果事件。
 - 新增消费者与人工客服最小 web workspace，以及部署恢复说明。
 - 新增非 root container deployment package、health check 和 secret/data 排除规则。
+- 新增 4 号 P0 系统架构与技术接口文档，以及支持 HTTP/Python 调用的 typed deterministic AI Mock
+  decision package。
 
 ### Changed
 

@@ -36,6 +36,7 @@ scripts/dev.sh config/production.env
 | `KNOWLEDGE_VERSION` | string | `demo-knowledge-v1` | 当前演示知识版本 |
 | `HANDOFF_ETA_MINUTES` | integer | `30` | 演示人工响应时间；不代表正式 SLA |
 | `INTENT_MINIMUM_CONFIDENCE` | float | `0.7` | 外部意图 provider 结果被采用的最低置信度 |
+| `MOCK_API_ENABLED` | boolean | `true` | 是否开放 deterministic AI Mock endpoint；production 模板为 `false` |
 
 ## 安全边界
 

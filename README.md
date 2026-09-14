@@ -32,13 +32,15 @@ scripts/dev.sh
 - MongoDB 会话、审计、反馈、幂等人工事件和客服动作持久化。
 - 人工客服视图、事件队列和基础品牌洞察 API。
 - Ticket 人工回复、动作完成、用户确认解决和重开事件，以及消费者/客服最小 web workspace。
+- 可通过 HTTP 或 Python 调用的 typed AI Mock decision package，用于真实 AI 接入前联调。
 
 当前附件只进行 metadata 校验；系统会明确告知无法读取内容并建议转人工。订单系统、真实文件
 存储、登录鉴权和 webhook 等 external integration 尚未选型，不会在演示中伪造已接入状态。
 
 完整 API contract 与演示边界见
 [比赛 MVP API](docs/api.md)，实现结构见
-[比赛 MVP Backend Architecture](docs/architecture.md)。
+[比赛 MVP Backend Architecture](docs/architecture.md)，4 号 P0 技术合同见
+[系统架构与技术接口](docs/system-architecture-and-interfaces.md)。
 
 ## 质量检查
 

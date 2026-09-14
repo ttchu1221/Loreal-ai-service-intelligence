@@ -9,6 +9,8 @@
 - [比赛 MVP API](api.md)：消费者、人工客服与品牌洞察 endpoint、状态语义和 error behavior。
 - [比赛 MVP Backend Architecture](architecture.md)：请求链路、状态机、持久化、provider 边界和
   production 接入路线。
+- [P0 系统架构与技术接口](system-architecture-and-interfaces.md)：4 号负责的数据库、状态机、API
+  和可调用 AI Mock contract。
 - [MongoDB](mongodb.md)：本地启动、collection、index 与 production 安全要求。
 - [部署与恢复](deployment.md)：启动检查、稳定版本、恢复和降级边界。
 

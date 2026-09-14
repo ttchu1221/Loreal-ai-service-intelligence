@@ -10,6 +10,7 @@ from loreal_ai_service_intelligence import __version__
 from loreal_ai_service_intelligence.config import get_settings
 from loreal_ai_service_intelligence.intent import IntentProvider
 from loreal_ai_service_intelligence.knowledge import KnowledgeProvider
+from loreal_ai_service_intelligence.mock_api import MockDecisionService, create_mock_router
 from loreal_ai_service_intelligence.models import (
     AgentConversationView,
     AttemptCreateRequest,
@@ -47,6 +48,12 @@ def create_app(
         repository, settings, intent_provider, knowledge_provider
     )
     application = FastAPI(title=settings.app_name, version=__version__)
+    application.include_router(
+        create_mock_router(
+            MockDecisionService(settings.rule_version, settings.knowledge_version),
+            enabled=settings.mock_api_enabled,
+        )
+    )
 
     @application.exception_handler(PyMongoError)
     async def handle_database_error(_request: Request, _error: PyMongoError) -> JSONResponse:

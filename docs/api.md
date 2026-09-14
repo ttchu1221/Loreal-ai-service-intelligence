@@ -63,6 +63,15 @@ response 只包含消费者可见的自然语言、状态、依据与可执行�
 `GET /workspace/consumer` 和 `GET /workspace/agent` 提供无额外 frontend dependency 的最小可运行
 工作区，用于联调消费者输入和人工队列。它们不包含 production 登录能力。
 
+## AI Mock 接口
+
+`POST /v1/mock/decisions` 使用冻结的 typed contract 返回 `ASK`、`GUIDE`、`HANDOFF` 或 `BLOCK`，
+用于在真实 AI 模块接入前进行 frontend 和 backend 联调。Mock 无 network、database 或 Ticket side
+effect；风险与售后优先于普通 GUIDE，两次执行无改善后返回 `HANDOFF`，无 evidence 时不会生成产品
+事实。完整字段和示例见[系统架构与技术接口](system-architecture-and-interfaces.md#ai-mock-输入合同)。
+
+development 和 test 默认启用；production 的 `MOCK_API_ENABLED=false`，访问时返回 `404`。
+
 ## 品牌洞察
 
 `GET /v1/insights/overview` 返回咨询量、反馈解决率、转人工率、重复提问率和高频未解决问题。
