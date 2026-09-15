@@ -21,6 +21,19 @@ class RiskLevel(str, Enum):
     HIGH = "high"
 
 
+class UrgencyLevel(str, Enum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+
+
+class RiskStatus(str, Enum):
+    OPEN = "open"
+    MONITORING = "monitoring"
+    ESCALATED = "escalated"
+    CLOSED = "closed"
+
+
 class Intent(str, Enum):
     CONSULT = "consult"
     PURCHASE = "purchase"
@@ -131,6 +144,116 @@ class ConversationTranscriptItem(BaseModel):
     role: Literal["user", "assistant", "agent"]
     content: str = Field(min_length=1, max_length=8000)
     created_at: datetime
+
+
+class OrderSnapshot(BaseModel):
+    order_id: str = Field(min_length=1, max_length=100)
+    product_name: str = Field(min_length=1, max_length=200)
+    status: str = Field(min_length=1, max_length=100)
+    created_at: datetime
+
+
+class HistoricalTicketSnapshot(BaseModel):
+    ticket_id: str = Field(min_length=1, max_length=100)
+    category: str = Field(min_length=1, max_length=100)
+    status: str = Field(min_length=1, max_length=100)
+    summary: str = Field(min_length=1, max_length=1000)
+    created_at: datetime
+
+
+class AgentIntakeRequest(BaseModel):
+    source_conversation_id: Optional[str] = Field(default=None, min_length=1, max_length=100)
+    customer_id: str = Field(min_length=1, max_length=100)
+    current_message: str = Field(min_length=1, max_length=4000)
+    transcript: list[ConversationTranscriptItem] = Field(default_factory=list, max_length=100)
+    orders: list[OrderSnapshot] = Field(default_factory=list, max_length=20)
+    historical_tickets: list[HistoricalTicketSnapshot] = Field(default_factory=list, max_length=20)
+
+    @model_validator(mode="after")
+    def normalize_message(self) -> AgentIntakeRequest:
+        self.current_message = self.current_message.strip()
+        if not self.current_message:
+            raise ValueError("current_message must not be blank")
+        return self
+
+
+class AgentSourceContext(BaseModel):
+    source_conversation_id: Optional[str] = None
+    customer_id: str
+    orders: list[OrderSnapshot] = Field(default_factory=list)
+    historical_tickets: list[HistoricalTicketSnapshot] = Field(default_factory=list)
+
+
+class ServiceTimelineItem(BaseModel):
+    source: Literal["chat", "order", "ticket"]
+    occurred_at: datetime
+    title: str
+    detail: str
+
+
+class SourceEvidence(BaseModel):
+    source: Literal["chat", "order", "ticket", "knowledge"]
+    source_id: str = Field(min_length=1, max_length=100)
+    field: str = Field(min_length=1, max_length=100)
+    value: str = Field(min_length=1, max_length=2000)
+
+
+class RiskTracking(BaseModel):
+    risk_type: str = Field(min_length=1, max_length=100)
+    level: RiskLevel
+    status: RiskStatus = RiskStatus.OPEN
+    reasons: list[str] = Field(default_factory=list)
+    close_condition: str = Field(min_length=1, max_length=500)
+    updated_at: datetime
+
+
+class RiskUpdateRequest(BaseModel):
+    status: RiskStatus
+    note: Optional[str] = Field(default=None, max_length=1000)
+
+
+class SuggestionFeedbackRequest(BaseModel):
+    decision: Literal["adopted", "edited", "rejected"]
+    final_reply: Optional[str] = Field(default=None, max_length=8000)
+    reason: Optional[str] = Field(default=None, max_length=1000)
+
+    @model_validator(mode="after")
+    def validate_feedback(self) -> SuggestionFeedbackRequest:
+        if self.decision == "edited" and not (self.final_reply or "").strip():
+            raise ValueError("final_reply is required when decision is edited")
+        if self.decision == "rejected" and not (self.reason or "").strip():
+            raise ValueError("reason is required when decision is rejected")
+        return self
+
+
+class SuggestionFeedbackRecord(BaseModel):
+    feedback_id: str
+    conversation_id: str
+    decision: Literal["adopted", "edited", "rejected"]
+    original_draft: str
+    final_reply: Optional[str] = None
+    reason: Optional[str] = None
+    created_at: datetime
+
+
+class AgentAssistantBrief(BaseModel):
+    service_timeline: list[ServiceTimelineItem]
+    intent: Intent
+    emotion: str
+    urgency: UrgencyLevel
+    known_facts: list[str] = Field(default_factory=list)
+    unknown_fields: list[str] = Field(default_factory=list)
+    historical_promises: list[str] = Field(default_factory=list)
+    unresolved_items: list[str] = Field(default_factory=list)
+    risk_level: RiskLevel
+    risk_reasons: list[str]
+    source_evidence: list[SourceEvidence] = Field(default_factory=list)
+    reply_draft: str
+    evidence: list[KnowledgeReference]
+    next_actions: list[str]
+    escalation_target: Optional[
+        Literal["after_sales", "logistics", "complaint", "risk_specialist"]
+    ] = None
 
 
 class ConsumerConversationView(BaseModel):
@@ -287,6 +410,14 @@ class AgentConversationView(BaseModel):
     handoff_package: HandoffPackage
     empathy_card: EmpathyCard
     audit_trail: list[dict[str, Any]]
+    assistant_brief: Optional[AgentAssistantBrief] = None
+    risk_tracking: Optional[RiskTracking] = None
+    suggestion_feedback: list[SuggestionFeedbackRecord] = Field(default_factory=list)
+
+
+class AgentIntakeResponse(BaseModel):
+    event: EventSummary
+    conversation: AgentConversationView
 
 
 class InsightMetric(BaseModel):
@@ -318,6 +449,9 @@ class StoredConversation(BaseModel):
     case: Optional[CaseRecord] = None
     attempts: list[AttemptRecord] = Field(default_factory=list)
     ticket: Optional[TicketRecord] = None
+    source_context: Optional[AgentSourceContext] = None
+    risk_tracking: Optional[RiskTracking] = None
+    suggestion_feedback: list[SuggestionFeedbackRecord] = Field(default_factory=list)
     improvements: list[ImprovementRecord] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime

@@ -66,6 +66,12 @@ response 只包含消费者可见的自然语言、状态、依据与可执行�
 
 ## 人工客服工作台
 
+- `POST /v1/agent/intakes`：agent-first 主入口。接收 `customer_id`、当前消息、已有 transcript、订单
+  快照和历史工单快照，并可用 `source_conversation_id` 保留上游会话关联；消费者进线时立即创建
+  `processing` 客服事件，无需等待 AI 失败。响应包含服务轨迹、意图、情绪、紧急度、已知/未知、
+  历史承诺、未完成事项、字段级来源依据、风险、可审核回复草稿、下一步动作，以及
+  `after_sales`、`logistics`、`complaint` 或 `risk_specialist` 升级方向。上游系统只需映射 typed
+  snapshot，不应把订单或工单 credential 传入本服务。
 - `GET /v1/agent/events`：按风险优先级和等待时间返回事件队列。
   已关闭或由消费者确认解决的事件不再出现在待处理队列；消费者选择“仍需处理”后会重新入队。
 - `GET /v1/agent/conversations/{conversation_id}`：返回消费者原话、包含 `user`、`assistant`、
@@ -77,6 +83,10 @@ response 只包含消费者可见的自然语言、状态、依据与可执行�
   主体明确记录为 `unauthenticated_agent_api`；生产环境必须用认证身份替换。
 - `POST /v1/agent/conversations/{conversation_id}/ticket/results`：分别记录人工回复、动作完成、
   用户确认解决或重开；这些结果不会相互冒充。
+- `POST /v1/agent/conversations/{conversation_id}/suggestion-feedback`：记录客服对 AI 草稿的
+  `adopted`、`edited` 或 `rejected` 决策；edited 必须提供最终回复，rejected 必须提供原因。
+- `PATCH /v1/agent/conversations/{conversation_id}/risk`：维护风险 `open`、`monitoring`、
+  `escalated`、`closed` 生命周期。关闭时必须提供说明，状态变化进入审计轨迹。
 
 `GET /workspace/consumer` 和 `GET /workspace/agent` 提供无额外 frontend dependency 的最小可运行
 工作区，用于联调消费者输入和人工队列。消费者端每两秒同步 Ticket，并把人工回复显示为客服消息
@@ -84,9 +94,18 @@ response 只包含消费者可见的自然语言、状态、依据与可执行�
 UTC 时间转换为浏览器本地时间。客服可在处理结束后关闭会话；人工回复/动作由客服提交，解决确认/
 继续处理由消费者提交。它们不包含 production 登录能力。
 
+当前消费者 API 继续保留以兼容既有演示，但新业务集成应优先从 `/v1/agent/intakes` 进入客服工作台。
+工作台中的 draft 只作为建议，必须由人工客服审核后发送；`HANDOFF` 仅为旧消费者流程兼容状态，新
+主流程通过 `escalation_target` 表达售后、物流、投诉和风险专员升级。
+
 ## AI Mock 接口
 
-`POST /v1/mock/decisions` 使用冻结的 typed contract 返回 `ASK`、`GUIDE`、`HANDOFF` 或 `BLOCK`，
+`POST /v1/mock/agent-assists` 是人工客服插件主 Mock：输入与正式 agent intake 使用相同 context，输出
+服务轨迹、共情理解、建议和风险跟踪四个固定区域，且不会写数据库或产生 Ticket。字段级 evidence
+明确指向 chat、order 或 ticket 的 source ID，供前端和 3 号 AI 模块直接联调。
+
+`POST /v1/mock/decisions` 作为旧消费者流程兼容接口，使用冻结的 typed contract 返回 `ASK`、
+`GUIDE`、`HANDOFF` 或 `BLOCK`，
 用于在真实 AI 模块接入前进行 frontend 和 backend 联调。Mock 无 network、database 或 Ticket side
 effect；风险与售后优先于普通 GUIDE，两次执行无改善后返回 `HANDOFF`，无 evidence 时不会生成产品
 事实。完整字段和示例见[系统架构与技术接口](system-architecture-and-interfaces.md#ai-mock-输入合同)。

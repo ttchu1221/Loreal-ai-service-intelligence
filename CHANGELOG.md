@@ -19,6 +19,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- 修复启用 LLM 后“暂不转人工”的用户选择确认语可能被模型改写的问题；该状态现保持确定性话术。
 - 修复 LLM 仅参与 intent 分类、配置真实模型后消费者话术仍然单一的问题；生成异常或非法输出会自动回退且不影响主流程。
 - 修复消费者转人工后客服工作台只刷新队列但不打开工单，以及部分浏览器因隐式 DOM 全局变量导致页面无反应的问题；新工单现会自动展示，并显示同步状态或错误。
 - 修复消费者发送消息后，部分浏览器因 `message`、`messages` 等隐式 DOM 全局变量失效而造成页面卡住的问题；同时取消 `ASK` 状态下自动覆盖消费者输入，并支持长消息安全换行。
@@ -30,6 +31,13 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- 新增 `/v1/mock/agent-assists` 人工客服插件 Mock contract，完整返回服务轨迹、共情理解、回复与动作
+  建议、风险跟踪四个区域，并提供聊天、订单和历史工单的字段级来源依据。
+- 新增 AI 草稿采纳、编辑、拒绝反馈 API，以及风险 `open`、`monitoring`、`escalated`、`closed`
+  状态流转 API 和审计记录；agent-first intake 支持保留上游 `source_conversation_id`。
+- 新增 agent-first `/v1/agent/intakes` 主入口，可融合聊天、订单和历史工单，消费者进线即创建客服
+  事件，并生成服务轨迹、意图、情绪、风险、回复草稿、依据、下一步动作与业务升级方向；客服工作台
+  可直接展示并使用该辅助包。
 - Added repository-wide development instructions and documentation conventions.
 - Added the initial FastAPI service skeleton and health endpoint.
 - 新增 development、test 和 production 的 config 模板与类型化 runtime settings。
