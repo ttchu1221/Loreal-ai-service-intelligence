@@ -34,6 +34,26 @@ def run_demo_smoke() -> list[tuple[str, int, str]]:
         "/v1/mock/decisions",
         json={"request_id": "demo-001", "current_message": "我的底妆总是搓泥"},
     )
+    intake = call(
+        "客服进线聚合",
+        "POST",
+        "/v1/agent/intakes",
+        201,
+        json={
+            "customer_id": "customer-smoke-001",
+            "current_message": "快递还没收到，我很着急",
+            "transcript": [],
+            "orders": [
+                {
+                    "order_id": "order-smoke-001",
+                    "product_name": "演示粉底",
+                    "status": "shipped",
+                    "created_at": "2026-09-14T08:00:00Z",
+                }
+            ],
+            "historical_tickets": [],
+        },
+    )
     conversation = call(
         "消费者开始排查",
         "POST",
@@ -125,6 +145,7 @@ def run_demo_smoke() -> list[tuple[str, int, str]]:
     )
 
     assert mock["state"] == "ASK"
+    assert intake["conversation"]["assistant_brief"]["escalation_target"] == "logistics"
     assert conversation["state"] == "ASK" and guide["state"] == "GUIDE"
     assert case["current_revision"] == 2 and updated_attempt["outcome"] == "improved"
     assert handoff["handoff_package"]["ticket"]["status"] == "waiting_for_agent"

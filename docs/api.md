@@ -66,6 +66,11 @@ response 只包含消费者可见的自然语言、状态、依据与可执行�
 
 ## 人工客服工作台
 
+- `POST /v1/agent/intakes`：agent-first 主入口。接收 `customer_id`、当前消息、已有 transcript、订单
+  快照和历史工单快照；消费者进线时立即创建 `processing` 客服事件，无需等待 AI 失败。响应包含按
+  时间合并的服务轨迹、意图、情绪、风险、可审核回复草稿、知识依据、下一步动作，以及
+  `after_sales`、`logistics`、`complaint` 或 `risk_specialist` 升级方向。上游系统只需映射 typed
+  snapshot，不应把订单或工单 credential 传入本服务。
 - `GET /v1/agent/events`：按风险优先级和等待时间返回事件队列。
   已关闭或由消费者确认解决的事件不再出现在待处理队列；消费者选择“仍需处理”后会重新入队。
 - `GET /v1/agent/conversations/{conversation_id}`：返回消费者原话、包含 `user`、`assistant`、
@@ -83,6 +88,10 @@ response 只包含消费者可见的自然语言、状态、依据与可执行�
 气泡；客服端以聊天气泡显示双方完整对话，每三秒刷新队列和当前会话、自动打开首个新 Ticket，并将
 UTC 时间转换为浏览器本地时间。客服可在处理结束后关闭会话；人工回复/动作由客服提交，解决确认/
 继续处理由消费者提交。它们不包含 production 登录能力。
+
+当前消费者 API 继续保留以兼容既有演示，但新业务集成应优先从 `/v1/agent/intakes` 进入客服工作台。
+工作台中的 draft 只作为建议，必须由人工客服审核后发送；`HANDOFF` 仅为旧消费者流程兼容状态，新
+主流程通过 `escalation_target` 表达售后、物流、投诉和风险专员升级。
 
 ## AI Mock 接口
 

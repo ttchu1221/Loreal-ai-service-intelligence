@@ -12,6 +12,8 @@ from loreal_ai_service_intelligence.api.mock import MockDecisionService, create_
 from loreal_ai_service_intelligence.config import get_settings
 from loreal_ai_service_intelligence.domain.models import (
     AgentConversationView,
+    AgentIntakeRequest,
+    AgentIntakeResponse,
     AttemptCreateRequest,
     AttemptRecord,
     AttemptUpdateRequest,
@@ -298,6 +300,15 @@ def create_app(
             for event in repository.list_events()
             if event["status"] != "completed"
         ]
+
+    @application.post(
+        "/v1/agent/intakes",
+        response_model=AgentIntakeResponse,
+        status_code=status.HTTP_201_CREATED,
+        tags=["agent"],
+    )
+    def create_agent_intake(request: AgentIntakeRequest) -> AgentIntakeResponse:
+        return orchestrator.start_agent_intake(request)
 
     @application.get(
         "/v1/agent/conversations/{conversation_id}",
@@ -695,12 +706,19 @@ syncStatus.style.color='';if(!selected&&b.length)await selectEvent(b[0],false);
 else if(selected&&b.some(x=>x.event_id===selected.event_id))await selectEvent(selected,false);
 }catch(e){showAgentError(e);}finally{loading=false;}}
 async function selectEvent(event,reload=true){selected=event;const b=await call(
-`/v1/agent/conversations/${event.conversation_id}`);const p=b.handoff_package;
+`/v1/agent/conversations/${event.conversation_id}`);const p=b.handoff_package;const brief=b.assistant_brief;
 const attempts=p.attempts.length?p.attempts.map((x,i)=>
 `${i+1}. ${x.recommendation}｜${x.execution_status}｜${x.observation||'无观察记录'}`).join('\\n'):
 '暂无建议执行记录';
 detailPanel.replaceChildren();const notice=document.createElement('div');notice.className='notice';
-notice.textContent=`AI 已交接 · ${p.handoff_reason}`;detailPanel.append(notice);
+notice.textContent=brief?'AI 坐席辅助已就绪':`AI 已交接 · ${p.handoff_reason}`;detailPanel.append(notice);
+if(brief){const assist=document.createElement('details');assist.className='handoff-card';assist.open=true;
+const assistTitle=document.createElement('summary');assistTitle.textContent='AI 服务判断与建议';
+const assistInfo=document.createElement('pre');const evidence=brief.evidence.map(x=>`${x.source}：${x.excerpt}`).join('\\n')||'暂无可引用依据';
+assistInfo.textContent=`意图：${brief.intent}\n情绪：${brief.emotion}\n风险：${brief.risk_level}`+
+`\n升级方向：${brief.escalation_target||'无需升级'}\n\n下一步：\n${brief.next_actions.join('\\n')}`+
+`\n\n依据：\n${evidence}`;assist.append(assistTitle,assistInfo);detailPanel.append(assist);
+if(!noteInput.value.trim())noteInput.value=brief.reply_draft;}
 p.transcript.forEach(x=>{const bubble=document.createElement('div');bubble.className=`bubble ${x.role}`;
 const meta=document.createElement('div');meta.className='bubble-meta';meta.textContent=
 `${x.role==='user'?'消费者':x.role==='agent'?'人工客服':'AI 顾问'} · ${localTime(x.created_at)}`;
@@ -709,6 +727,10 @@ const card=document.createElement('details');card.className='handoff-card';const
 summary.textContent='查看 AI 交接摘要与处理建议';const info=document.createElement('pre');info.textContent=
 `状态：${p.current_state}\n已确认事实：${p.confirmed_facts.join('\\n')||'暂无'}\n仍缺信息：${p.missing_information.join('\\n')||'暂无'}`+
 `\n建议执行情况：${attempts}\n建议下一步：${p.suggested_next_step}`;card.append(summary,info);detailPanel.append(card);
+if(brief){const timeline=document.createElement('details');timeline.className='handoff-card';
+const timelineTitle=document.createElement('summary');timelineTitle.textContent='查看完整服务轨迹';
+const timelineInfo=document.createElement('pre');timelineInfo.textContent=brief.service_timeline.map(x=>
+`${localTime(x.occurred_at)} · ${x.title}\n${x.detail}`).join('\\n\\n');timeline.append(timelineTitle,timelineInfo);detailPanel.append(timeline);}
 detailPanel.scrollTop=detailPanel.scrollHeight;
 caseTitleEl.textContent=p.summary.length>30?`${p.summary.slice(0,30)}…`:p.summary;
 caseMetaEl.textContent=`会话 ${p.conversation_id}`;caseStatusEl.textContent=statusLabel(p.ticket?.status||event.status);

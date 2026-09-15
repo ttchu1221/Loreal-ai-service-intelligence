@@ -5,7 +5,11 @@ from uuid import uuid4
 
 from loreal_ai_service_intelligence.config import Settings
 from loreal_ai_service_intelligence.domain.models import (
+    AgentAssistantBrief,
     AgentConversationView,
+    AgentIntakeRequest,
+    AgentIntakeResponse,
+    AgentSourceContext,
     AttemptCreateRequest,
     AttemptRecord,
     AttemptUpdateRequest,
@@ -22,6 +26,7 @@ from loreal_ai_service_intelligence.domain.models import (
     HandoffPackage,
     Intent,
     RiskLevel,
+    ServiceTimelineItem,
     StoredConversation,
     TicketRecord,
     TicketResultRequest,
@@ -73,6 +78,76 @@ class ConversationOrchestrator:
     def start(self, request: ConversationRequest) -> ConsumerResponse:
         conversation_id = f"conv_{uuid4().hex}"
         return self._process(conversation_id, request, None)
+
+    def start_agent_intake(self, intake: AgentIntakeRequest) -> AgentIntakeResponse:
+        """Create an agent-owned service case from aggregated upstream context."""
+        now = utc_now()
+        conversation_id = f"conv_{uuid4().hex}"
+        request = ConversationRequest(
+            message=intake.current_message,
+            product=intake.orders[0].product_name if intake.orders else None,
+            order_reference=intake.orders[0].order_id if intake.orders else None,
+        )
+        card = EmpathyCard.model_validate(
+            self.decision_policy.decide(conversation_id, request, None)
+        )
+        transcript = list(intake.transcript)
+        if not transcript or transcript[-1].content != intake.current_message:
+            transcript.append(
+                ConversationTranscriptItem(
+                    role="user", content=intake.current_message, created_at=now
+                )
+            )
+        stored = StoredConversation(
+            conversation_id=conversation_id,
+            state=card.next_state,
+            messages=[item.content for item in transcript if item.role == "user"],
+            transcript=transcript,
+            empathy_card=card,
+            last_result_id=f"result_{uuid4().hex}",
+            case=self._initial_case(conversation_id, request),
+            source_context=AgentSourceContext(
+                customer_id=intake.customer_id,
+                orders=intake.orders,
+                historical_tickets=intake.historical_tickets,
+            ),
+            created_at=now,
+            updated_at=now,
+        )
+        self.repository.save_conversation(stored)
+        eta = now + timedelta(minutes=self.settings.handoff_eta_minutes)
+        event_row = self.repository.create_event(
+            {
+                "event_id": f"evt_{uuid4().hex}",
+                "conversation_id": conversation_id,
+                "status": "processing",
+                "priority": 100 if card.risk_level == RiskLevel.HIGH else 50,
+                "reason": f"消费者进线 · {card.intent.value}",
+                "estimated_response_at": eta.isoformat(),
+            },
+            f"agent-intake:{conversation_id}",
+        )
+        stored.ticket = TicketRecord(
+            ticket_id=str(event_row["event_id"]),
+            conversation_id=conversation_id,
+            status="waiting_for_agent",
+            created_at=now,
+            updated_at=now,
+        )
+        self.repository.save_conversation(stored)
+        self.repository.add_audit(
+            conversation_id,
+            "agent_intake_created",
+            {
+                "customer_id": intake.customer_id,
+                "chat_count": len(transcript),
+                "order_count": len(intake.orders),
+                "historical_ticket_count": len(intake.historical_tickets),
+            },
+        )
+        view = self.agent_view(conversation_id)
+        assert view is not None
+        return AgentIntakeResponse(event=self._event_summary(event_row), conversation=view)
 
     def continue_conversation(
         self, conversation_id: str, request: ConversationRequest
@@ -499,4 +574,79 @@ class ConversationOrchestrator:
             handoff_package=package,
             empathy_card=card,
             audit_trail=self.repository.get_audit(conversation_id),
+            assistant_brief=self._agent_assistant_brief(conversation),
+        )
+
+    def _agent_assistant_brief(
+        self, conversation: StoredConversation
+    ) -> AgentAssistantBrief | None:
+        context = conversation.source_context
+        if context is None:
+            return None
+        card = conversation.empathy_card
+        timeline = [
+            ServiceTimelineItem(
+                source="chat",
+                occurred_at=item.created_at,
+                title={"user": "消费者消息", "assistant": "AI 消息", "agent": "客服回复"}[
+                    item.role
+                ],
+                detail=item.content,
+            )
+            for item in conversation.transcript
+        ]
+        timeline.extend(
+            ServiceTimelineItem(
+                source="order",
+                occurred_at=item.created_at,
+                title=f"订单 {item.order_id} · {item.status}",
+                detail=item.product_name,
+            )
+            for item in context.orders
+        )
+        timeline.extend(
+            ServiceTimelineItem(
+                source="ticket",
+                occurred_at=item.created_at,
+                title=f"历史工单 {item.ticket_id} · {item.status}",
+                detail=f"{item.category}：{item.summary}",
+            )
+            for item in context.historical_tickets
+        )
+        messages = " ".join(conversation.messages)
+        emotion = (
+            "angry"
+            if any(word in messages for word in ("投诉", "气死", "太差", "欺骗"))
+            else "anxious"
+            if any(word in messages for word in ("着急", "怎么办", "严重", "红肿", "刺痛"))
+            else "neutral"
+        )
+        escalation_target = None
+        if card.risk_level == RiskLevel.HIGH:
+            escalation_target = "risk_specialist"
+        elif card.intent == Intent.COMPLAINT:
+            escalation_target = "complaint"
+        elif any(word in messages for word in ("物流", "快递", "没收到")):
+            escalation_target = "logistics"
+        elif card.intent == Intent.AFTER_SALES:
+            escalation_target = "after_sales"
+        draft, _ = self._consumer_copy(card)
+        next_actions = ["核对消费者当前诉求与已知事实"]
+        if context.orders:
+            next_actions.append("核对关联订单状态")
+        if context.historical_tickets:
+            next_actions.append("避免重复询问历史工单已有信息")
+        next_actions.append(
+            f"升级至 {escalation_target}" if escalation_target else "审核并发送回复草稿"
+        )
+        return AgentAssistantBrief(
+            service_timeline=sorted(timeline, key=lambda item: item.occurred_at),
+            intent=card.intent,
+            emotion=emotion,
+            risk_level=card.risk_level,
+            risk_reasons=card.risk_reasons,
+            reply_draft=draft,
+            evidence=card.knowledge_refs,
+            next_actions=next_actions,
+            escalation_target=escalation_target,
         )

@@ -149,33 +149,6 @@ def test_consumer_sees_agent_reply_and_controls_resolution() -> None:
     assert restored["transcript"][-1]["role"] == "agent"
     assert restored["transcript"][-1]["content"] == agent_reply
 
-
-def test_agent_can_close_conversation_and_consumer_can_reopen_it() -> None:
-    client = make_client()
-    created = client.post("/v1/conversations", json={"message": "我要人工客服"}).json()
-    conversation_id = created["conversation_id"]
-    event = client.get("/v1/agent/events").json()[0]
-
-    closed = client.post(
-        f"/v1/agent/events/{event['event_id']}/actions",
-        json={"action": "close", "parameters": {"note": "本次人工处理完成"}},
-    )
-    assert closed.status_code == 200
-    assert closed.json()["status"] == "completed"
-    assert client.get("/v1/agent/events").json() == []
-    assert client.get(f"/v1/conversations/{conversation_id}/ticket").json()["status"] == (
-        "action_completed"
-    )
-
-    reopened = client.post(
-        f"/v1/conversations/{conversation_id}/ticket/results",
-        json={"event": "reopened", "note": "消费者仍需处理"},
-    )
-    assert reopened.status_code == 200
-    queue = client.get("/v1/agent/events").json()
-    assert len(queue) == 1
-    assert queue[0]["status"] == "waiting_for_agent"
-
     follow_up = "我已经等了五分钟，接下来应该怎么做？"
     forwarded = client.post(
         f"/v1/conversations/{conversation_id}/messages", json={"message": follow_up}
@@ -204,6 +177,101 @@ def test_agent_can_close_conversation_and_consumer_can_reopen_it() -> None:
         json={"event": "agent_replied", "note": "消费者不可伪造客服回复"},
     )
     assert invalid.status_code == 422
+
+
+def test_agent_can_close_conversation_and_consumer_can_reopen_it() -> None:
+    client = make_client()
+    created = client.post("/v1/conversations", json={"message": "我要人工客服"}).json()
+    conversation_id = created["conversation_id"]
+    event = client.get("/v1/agent/events").json()[0]
+
+    closed = client.post(
+        f"/v1/agent/events/{event['event_id']}/actions",
+        json={"action": "close", "parameters": {"note": "本次人工处理完成"}},
+    )
+    assert closed.status_code == 200
+    assert closed.json()["status"] == "completed"
+    assert client.get("/v1/agent/events").json() == []
+    assert client.get(f"/v1/conversations/{conversation_id}/ticket").json()["status"] == (
+        "action_completed"
+    )
+
+    reopened = client.post(
+        f"/v1/conversations/{conversation_id}/ticket/results",
+        json={"event": "reopened", "note": "消费者仍需处理"},
+    )
+    assert reopened.status_code == 200
+    queue = client.get("/v1/agent/events").json()
+    assert len(queue) == 1
+    assert queue[0]["status"] == "waiting_for_agent"
+
+
+def test_agent_intake_aggregates_context_and_returns_assistant_brief() -> None:
+    client = make_client()
+    response = client.post(
+        "/v1/agent/intakes",
+        json={
+            "customer_id": "customer_demo_001",
+            "current_message": "订单还没收到，我很着急，帮我查一下物流",
+            "transcript": [
+                {
+                    "role": "user",
+                    "content": "昨天说今天能到",
+                    "created_at": "2026-09-14T10:00:00Z",
+                }
+            ],
+            "orders": [
+                {
+                    "order_id": "order_demo_001",
+                    "product_name": "演示粉底液",
+                    "status": "shipped",
+                    "created_at": "2026-09-13T08:00:00Z",
+                }
+            ],
+            "historical_tickets": [
+                {
+                    "ticket_id": "ticket_demo_001",
+                    "category": "logistics",
+                    "status": "closed",
+                    "summary": "消费者曾咨询发货时间",
+                    "created_at": "2026-09-13T12:00:00Z",
+                }
+            ],
+        },
+    )
+    assert response.status_code == 201
+    body = response.json()
+    assert body["event"]["status"] == "processing"
+    brief = body["conversation"]["assistant_brief"]
+    assert brief["emotion"] == "anxious"
+    assert brief["escalation_target"] == "logistics"
+    assert {item["source"] for item in brief["service_timeline"]} == {
+        "chat",
+        "order",
+        "ticket",
+    }
+    assert "核对关联订单状态" in brief["next_actions"]
+    assert brief["reply_draft"]
+    assert (
+        client.get("/v1/agent/events").json()[0]["conversation_id"]
+        == body["event"]["conversation_id"]
+    )
+
+
+def test_agent_intake_routes_business_and_safety_escalations() -> None:
+    client = make_client()
+    scenarios = (
+        ("我要投诉，客服一直不处理", "complaint"),
+        ("申请退款和退货", "after_sales"),
+        ("使用后呼吸困难并持续红肿", "risk_specialist"),
+    )
+    for index, (message, target) in enumerate(scenarios):
+        response = client.post(
+            "/v1/agent/intakes",
+            json={"customer_id": f"customer-{index}", "current_message": message},
+        )
+        assert response.status_code == 201
+        assert response.json()["conversation"]["assistant_brief"]["escalation_target"] == target
 
 
 def test_minimum_workspaces_are_available() -> None:

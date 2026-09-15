@@ -133,6 +133,63 @@ class ConversationTranscriptItem(BaseModel):
     created_at: datetime
 
 
+class OrderSnapshot(BaseModel):
+    order_id: str = Field(min_length=1, max_length=100)
+    product_name: str = Field(min_length=1, max_length=200)
+    status: str = Field(min_length=1, max_length=100)
+    created_at: datetime
+
+
+class HistoricalTicketSnapshot(BaseModel):
+    ticket_id: str = Field(min_length=1, max_length=100)
+    category: str = Field(min_length=1, max_length=100)
+    status: str = Field(min_length=1, max_length=100)
+    summary: str = Field(min_length=1, max_length=1000)
+    created_at: datetime
+
+
+class AgentIntakeRequest(BaseModel):
+    customer_id: str = Field(min_length=1, max_length=100)
+    current_message: str = Field(min_length=1, max_length=4000)
+    transcript: list[ConversationTranscriptItem] = Field(default_factory=list, max_length=100)
+    orders: list[OrderSnapshot] = Field(default_factory=list, max_length=20)
+    historical_tickets: list[HistoricalTicketSnapshot] = Field(default_factory=list, max_length=20)
+
+    @model_validator(mode="after")
+    def normalize_message(self) -> AgentIntakeRequest:
+        self.current_message = self.current_message.strip()
+        if not self.current_message:
+            raise ValueError("current_message must not be blank")
+        return self
+
+
+class AgentSourceContext(BaseModel):
+    customer_id: str
+    orders: list[OrderSnapshot] = Field(default_factory=list)
+    historical_tickets: list[HistoricalTicketSnapshot] = Field(default_factory=list)
+
+
+class ServiceTimelineItem(BaseModel):
+    source: Literal["chat", "order", "ticket"]
+    occurred_at: datetime
+    title: str
+    detail: str
+
+
+class AgentAssistantBrief(BaseModel):
+    service_timeline: list[ServiceTimelineItem]
+    intent: Intent
+    emotion: str
+    risk_level: RiskLevel
+    risk_reasons: list[str]
+    reply_draft: str
+    evidence: list[KnowledgeReference]
+    next_actions: list[str]
+    escalation_target: Optional[
+        Literal["after_sales", "logistics", "complaint", "risk_specialist"]
+    ] = None
+
+
 class ConsumerConversationView(BaseModel):
     conversation_id: str
     state: ConversationState
@@ -287,6 +344,12 @@ class AgentConversationView(BaseModel):
     handoff_package: HandoffPackage
     empathy_card: EmpathyCard
     audit_trail: list[dict[str, Any]]
+    assistant_brief: Optional[AgentAssistantBrief] = None
+
+
+class AgentIntakeResponse(BaseModel):
+    event: EventSummary
+    conversation: AgentConversationView
 
 
 class InsightMetric(BaseModel):
@@ -318,6 +381,7 @@ class StoredConversation(BaseModel):
     case: Optional[CaseRecord] = None
     attempts: list[AttemptRecord] = Field(default_factory=list)
     ticket: Optional[TicketRecord] = None
+    source_context: Optional[AgentSourceContext] = None
     improvements: list[ImprovementRecord] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime

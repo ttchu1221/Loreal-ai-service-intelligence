@@ -30,6 +30,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- 新增 agent-first `/v1/agent/intakes` 主入口，可融合聊天、订单和历史工单，消费者进线即创建客服
+  事件，并生成服务轨迹、意图、情绪、风险、回复草稿、依据、下一步动作与业务升级方向；客服工作台
+  可直接展示并使用该辅助包。
 - Added repository-wide development instructions and documentation conventions.
 - Added the initial FastAPI service skeleton and health endpoint.
 - 新增 development、test 和 production 的 config 模板与类型化 runtime settings。
