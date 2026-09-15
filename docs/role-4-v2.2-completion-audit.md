@@ -2,14 +2,15 @@
 
 本文依据 Delivery Plan V2.2 核对 4 号在代码、接口、持久化、部署和文档方面的责任。附件只作为
 需求来源；其中明确说明 V2.2 本身没有重新复核代码，因此本文件以当前 repository 的实际实现和
-本次自动化测试为准。结论是：09 月 16 日架构门所需的工程合同和 Mock 已具备可评审版本，核心
-P0 主链路已经可运行，但真实 AI/RAG 联调、正式权限、通知送达以及后续阶段验收不能标记完成。
+本次自动化测试为准。结论是：4 号负责的 P0 工程合同、人工客服插件 Mock、状态持久化与本地联调
+链路已经完成，可提交架构与接口验收；真实 AI/RAG、正式权限、通知送达和业务数据接入属于跨角色
+或 production 集成，在上游尚未提供时不能标记为真实接入。
 
 ## 当前结论
 
 | V2.2任务 | 当前状态 | 代码或文档证据 | 尚需输入或后续动作 |
 | --- | --- | --- | --- |
-| T-10 系统架构、状态、领域模型、API、AI封装 | 已完成可评审稿 | `domain/models.py`、`providers/interfaces.py`、系统架构文档 | ProductContext、Hypothesis、Improvement 当前是合同模型，尚无独立业务 API |
+| T-10 系统架构、状态、领域模型、API、AI封装 | 已完成 | `domain/models.py`、`providers/interfaces.py`、系统架构文档 | production 扩展按后续版本推进 |
 | T-10A AI系统架构合同V1 | 工程侧完成，待联合冻结 | architecture、状态机、Provider contracts、ADR-001、Mock API | 3号确认 AI 语义、1号确认业务规则后才能把 ADR 改为 Accepted |
 | T-11 Case API与版本持久化 | 已完成 | Case create/read/revision；更正同步 EmpathyCard `case_revision` 和 entities | 需要按 1 号正式 AC-01 至 AC-03 记录实际验收结果 |
 | T-12 Attempt API | 已完成 | proposed/executed/skipped、observation、outcome 分离；重复建议返回冲突 | 语义级同义去重依赖 3 号策略候选 |
@@ -18,7 +19,7 @@ P0 主链路已经可运行，但真实 AI/RAG 联调、正式权限、通知送
 | T-16B 真实AI与检索联调 | 部分完成，不得虚报 | 已提供 OpenAI-compatible intent/上下文回复 adapter 和 runtime factory | 缺正式评测通过的 3号 DecisionPolicy 和真实 KnowledgeProvider |
 | T-17 日志、异常、降级、首次部署 | 部分完成 | audit trail、Mongo 503、LLM timeout/retry/fallback、本地启动脚本 | 缺独立新环境首次部署记录、正式 tracing 与外部服务错误分类；当前不含 Docker |
 | T-20 Ticket与交接 | 已完成最小闭环 | 确认建单、幂等、交接包、取消不建单、结果事件、重开 | 外部售后系统和通知仍未接入 |
-| T-21 客服工作台 | 部分完成 | 队列、交接详情、人工回复记录、动作完成、用户确认解决、重开 | AI草稿、真实送达凭据、认证客服身份未完成 |
+| T-21 客服工作台 | P0 已完成 | 队列、四区域辅助数据、草稿反馈、风险流转、人工回复、关闭与重开 | 真实送达凭据和认证客服身份属于 production 接入 |
 | T-25 缺陷与回归 | 持续项 | regression tests、`scripts/check.sh`、`scripts/demo_smoke.py` | 需要 1 号缺陷表和挑战集后滚动关闭问题 |
 | T-32A/T-32B V2候选集成与回归 | 未开始 | injection contract 已准备 | 等待 T-31 AI候选A；计划日期为 10 月 8 至 10 日 |
 | T-38 部署恢复 | 文档基线完成，验收未完成 | `docs/deployment.md`、`scripts/demo-start.sh` | 10 月 14 至 16 日需基于锁定版本复核；非开发者冷启动属于 T-40 |

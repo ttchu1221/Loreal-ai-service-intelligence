@@ -15,8 +15,9 @@
                                                       ├ IntentProvider
                                                       └ KnowledgeProvider
 
-前端和 AI 联调 ─ POST /v1/mock/decisions ─ MockDecisionService
-                                            └ 无 network、database 或 Ticket 副作用
+前端和 AI 联调 ─ POST /v1/mock/agent-assists ─ MockDecisionService
+                 POST /v1/mock/decisions ────┘
+                                               └ 无 network、database 或 Ticket 副作用
 ```
 
 route 只执行 Schema validation、HTTP error mapping 和 service 调用。业务优先级、状态选择、Case、
@@ -73,9 +74,30 @@ resolved 和 reopened，客服动作完成不能自动等于用户确认解决�
 | `POST /v1/conversations/{id}/handoff` | 用户确认后幂等建单 | `404` conversation missing |
 | `GET /v1/agent/conversations/{id}` | 获取完整交接包 | `404` conversation missing |
 | `POST /v1/agent/conversations/{id}/ticket/results` | 写入四类 Ticket 结果事件 | `404` ticket missing |
+| `POST /v1/agent/conversations/{id}/suggestion-feedback` | 记录草稿采纳、编辑或拒绝 | `422` detail missing；`404` conversation missing |
+| `PATCH /v1/agent/conversations/{id}/risk` | 更新风险跟踪状态 | `409` invalid transition；`404` risk missing |
+| `POST /v1/mock/agent-assists` | 返回人工客服插件四区域 Mock | `404` Mock disabled；`422` Schema invalid |
 | `POST /v1/mock/decisions` | 使用冻结 contract 返回 deterministic AI Mock | `404` Mock disabled；`422` Schema invalid |
 
 完整 request 和 response 可在启动后的 `/docs` 查看。
+
+## 人工客服插件 Mock 合同
+
+`POST /v1/mock/agent-assists` 是 4 号提供给 3 号 AI 模块和前端的主联调接口。输入的 `context` 与
+正式 `/v1/agent/intakes` 共用 `AgentIntakeRequest`，包含 `source_conversation_id`、`customer_id`、
+当前消息、完整聊天、订单快照和历史工单快照。调用方负责从业务系统读取并映射这些 typed snapshot；
+本服务不接收上游 credential。
+
+输出固定为四个区域：
+
+1. `service_trajectory`：按时间合并 chat、order、ticket；
+2. `empathy_understanding`：intent、emotion、urgency、已知/未知、历史承诺和未完成事项；
+3. `suggestions`：可编辑回复草稿、下一步动作、升级方向以及字段级 evidence；
+4. `risk_tracking`：风险类型、等级、状态、原因、关闭条件和更新时间。
+
+该 Mock 是 deterministic、无持久化和无业务副作用的接口包，不会发送回复、创建 Ticket、退款或
+关闭真实工单。正式 intake 会持久化同类信息；客服通过 `suggestion-feedback` 记录 adopted、edited、
+rejected，通过 `risk` endpoint 更新风险生命周期。高风险关闭必须提供处理说明；所有变化写入 audit。
 
 ## AI Mock 输入合同
 

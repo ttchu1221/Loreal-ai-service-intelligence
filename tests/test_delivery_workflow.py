@@ -274,6 +274,75 @@ def test_agent_intake_routes_business_and_safety_escalations() -> None:
         assert response.json()["conversation"]["assistant_brief"]["escalation_target"] == target
 
 
+def test_agent_assistance_tracks_sources_feedback_and_risk_lifecycle() -> None:
+    client = make_client()
+    created = client.post(
+        "/v1/agent/intakes",
+        json={
+            "source_conversation_id": "upstream-1001",
+            "customer_id": "customer-1001",
+            "current_message": "使用后持续红肿，我很着急",
+            "orders": [
+                {
+                    "order_id": "order-1001",
+                    "product_name": "演示产品",
+                    "status": "delivered",
+                    "created_at": "2026-09-14T08:00:00Z",
+                }
+            ],
+        },
+    ).json()
+    conversation_id = created["event"]["conversation_id"]
+    brief = created["conversation"]["assistant_brief"]
+
+    assert brief["urgency"] == "high"
+    assert brief["known_facts"]
+    assert {item["source"] for item in brief["source_evidence"]} >= {"chat", "order"}
+    assert created["conversation"]["risk_tracking"]["status"] == "open"
+
+    feedback = client.post(
+        f"/v1/agent/conversations/{conversation_id}/suggestion-feedback",
+        json={"decision": "edited", "final_reply": "已人工调整并发送的安全回复。"},
+    )
+    assert feedback.status_code == 201
+    assert feedback.json()["decision"] == "edited"
+
+    escalated = client.patch(
+        f"/v1/agent/conversations/{conversation_id}/risk",
+        json={"status": "escalated", "note": "已升级风险专员"},
+    )
+    assert escalated.status_code == 200
+    assert escalated.json()["status"] == "escalated"
+    closed_without_note = client.patch(
+        f"/v1/agent/conversations/{conversation_id}/risk", json={"status": "closed"}
+    )
+    assert closed_without_note.status_code == 409
+    closed = client.patch(
+        f"/v1/agent/conversations/{conversation_id}/risk",
+        json={"status": "closed", "note": "消费者确认已获得安全指引"},
+    )
+    assert closed.status_code == 200
+    restored = client.get(f"/v1/agent/conversations/{conversation_id}").json()
+    assert restored["risk_tracking"]["status"] == "closed"
+    assert restored["suggestion_feedback"][0]["final_reply"] == "已人工调整并发送的安全回复。"
+
+
+def test_suggestion_feedback_validates_human_decision_details() -> None:
+    client = make_client()
+    created = client.post(
+        "/v1/agent/intakes",
+        json={"customer_id": "customer-feedback", "current_message": "查询订单进度"},
+    ).json()
+    conversation_id = created["event"]["conversation_id"]
+    path = f"/v1/agent/conversations/{conversation_id}/suggestion-feedback"
+
+    assert client.post(path, json={"decision": "edited"}).status_code == 422
+    assert client.post(path, json={"decision": "rejected"}).status_code == 422
+    adopted = client.post(path, json={"decision": "adopted"})
+    assert adopted.status_code == 201
+    assert adopted.json()["final_reply"] == adopted.json()["original_draft"]
+
+
 def test_minimum_workspaces_are_available() -> None:
     client = make_client()
 

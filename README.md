@@ -73,8 +73,9 @@ timeout 和 retry 直接使用代码默认值。保存后重新运行 `scripts/d
 
 ## 已实现能力
 
-- agent-first 进线 API：聚合当前聊天、订单和历史工单，自动形成客服待处理事件，并输出按时间排序的
-  服务轨迹、意图、情绪、风险、回复草稿、依据、下一步动作和专业团队升级方向。
+- agent-first 进线 API：通过上游 `source_conversation_id` 聚合当前聊天、订单和历史工单，自动形成
+  客服待处理事件，并输出服务轨迹、意图、情绪、紧急度、已知/未知信息、历史承诺、未完成事项、
+  字段级来源依据、回复草稿、下一步动作和专业团队升级方向。
 - 消费者多轮咨询及 `GUIDE`、`RESOLVE`、`ASK`、`HANDOFF`、`BLOCK` 状态编排；
   `GUIDE` 用于底妆搓泥单条件排查，`RESOLVE` 保留兼容既有通用咨询。
 - Case 事实版本、更正与未知项，以及建议执行、跳过、观察和结果相互独立的 Attempt 记录。
@@ -84,7 +85,8 @@ timeout 和 retry 直接使用代码默认值。保存后重新运行 `scripts/d
 - MongoDB 会话、审计、反馈、幂等人工事件和客服动作持久化。
 - 人工客服主工作台、事件队列和基础品牌洞察 API；消费者端作为进线与协作入口保留。
 - Ticket 人工回复、动作完成、用户确认解决和重开事件，以及消费者/客服最小 web workspace。
-- 可通过 HTTP 或 Python 调用的 typed AI Mock decision package，用于真实 AI 接入前联调。
+- 可通过 HTTP 调用的人工客服插件四区域 Mock，以及兼容旧流程的 typed AI decision Mock；人工客服
+  可记录草稿采纳/编辑/拒绝结果，并维护风险 `open`、`monitoring`、`escalated`、`closed` 生命周期。
 
 当前附件只进行 metadata 校验；系统会明确告知无法读取内容并建议转人工。订单系统、真实文件
 存储、登录鉴权和 webhook 等 external integration 尚未选型，不会在演示中伪造已接入状态。

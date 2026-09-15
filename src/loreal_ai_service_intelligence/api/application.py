@@ -30,7 +30,11 @@ from loreal_ai_service_intelligence.domain.models import (
     HandoffDecision,
     InsightMetric,
     InsightsResponse,
+    RiskTracking,
+    RiskUpdateRequest,
     ServiceActionRequest,
+    SuggestionFeedbackRecord,
+    SuggestionFeedbackRequest,
     TicketRecord,
     TicketResultRequest,
 )
@@ -320,6 +324,37 @@ def create_app(
         if view is None:
             raise HTTPException(status_code=404, detail="conversation not found")
         return view
+
+    @application.post(
+        "/v1/agent/conversations/{conversation_id}/suggestion-feedback",
+        response_model=SuggestionFeedbackRecord,
+        status_code=status.HTTP_201_CREATED,
+        tags=["agent"],
+    )
+    def record_suggestion_feedback(
+        conversation_id: str, request: SuggestionFeedbackRequest
+    ) -> SuggestionFeedbackRecord:
+        try:
+            feedback = orchestrator.record_suggestion_feedback(conversation_id, request)
+        except ValueError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        if feedback is None:
+            raise HTTPException(status_code=404, detail="conversation not found")
+        return feedback
+
+    @application.patch(
+        "/v1/agent/conversations/{conversation_id}/risk",
+        response_model=RiskTracking,
+        tags=["agent"],
+    )
+    def update_risk(conversation_id: str, request: RiskUpdateRequest) -> RiskTracking:
+        try:
+            risk = orchestrator.update_risk(conversation_id, request)
+        except ValueError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        if risk is None:
+            raise HTTPException(status_code=404, detail="risk tracking not found")
+        return risk
 
     @application.post(
         "/v1/agent/events/{event_id}/actions", response_model=EventSummary, tags=["agent"]

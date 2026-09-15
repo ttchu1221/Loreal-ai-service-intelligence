@@ -134,3 +134,75 @@ def test_mock_endpoint_can_be_disabled_for_production() -> None:
 
     assert response.status_code == 404
     assert response.json() == {"detail": "mock API is disabled"}
+
+
+def test_agent_assist_mock_returns_four_plugin_regions_without_side_effects() -> None:
+    client = make_client()
+    response = client.post(
+        "/v1/mock/agent-assists",
+        json={
+            "request_id": "agent-mock-1",
+            "context": {
+                "source_conversation_id": "upstream-conv-1",
+                "customer_id": "customer-1",
+                "current_message": "我很着急，上次承诺今天退款但还没处理",
+                "orders": [
+                    {
+                        "order_id": "order-1",
+                        "product_name": "演示产品",
+                        "status": "refund_pending",
+                        "created_at": "2026-09-14T08:00:00Z",
+                    }
+                ],
+                "historical_tickets": [
+                    {
+                        "ticket_id": "ticket-1",
+                        "category": "refund",
+                        "status": "processing",
+                        "summary": "客服承诺今天完成退款",
+                        "created_at": "2026-09-14T09:00:00Z",
+                    }
+                ],
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["provider"] == "deterministic_agent_mock"
+    assert set(body) >= {
+        "service_trajectory",
+        "empathy_understanding",
+        "suggestions",
+        "risk_tracking",
+    }
+    assert body["empathy_understanding"]["urgency"] == "medium"
+    assert body["empathy_understanding"]["historical_promises"]
+    assert body["empathy_understanding"]["unresolved_items"]
+    assert {item["source"] for item in body["suggestions"]["evidence"]} >= {
+        "chat",
+        "order",
+        "ticket",
+    }
+    assert client.get("/v1/agent/events").json() == []
+
+
+def test_agent_assist_mock_prioritizes_safety_risk() -> None:
+    body = (
+        make_client()
+        .post(
+            "/v1/mock/agent-assists",
+            json={
+                "request_id": "agent-risk-1",
+                "context": {
+                    "customer_id": "customer-risk",
+                    "current_message": "使用后持续红肿和刺痛",
+                },
+            },
+        )
+        .json()
+    )
+
+    assert body["risk_tracking"]["level"] == "high"
+    assert body["suggestions"]["escalation_target"] == "risk_specialist"
+    assert "停止使用" in body["suggestions"]["reply_draft"]

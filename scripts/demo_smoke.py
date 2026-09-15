@@ -34,12 +34,35 @@ def run_demo_smoke() -> list[tuple[str, int, str]]:
         "/v1/mock/decisions",
         json={"request_id": "demo-001", "current_message": "我的底妆总是搓泥"},
     )
+    agent_mock = call(
+        "客服插件 Mock",
+        "POST",
+        "/v1/mock/agent-assists",
+        json={
+            "request_id": "agent-demo-001",
+            "context": {
+                "source_conversation_id": "upstream-smoke-001",
+                "customer_id": "customer-smoke-001",
+                "current_message": "上次承诺今天处理退款，但现在还没完成",
+                "historical_tickets": [
+                    {
+                        "ticket_id": "ticket-smoke-001",
+                        "category": "refund",
+                        "status": "processing",
+                        "summary": "客服承诺今天完成退款",
+                        "created_at": "2026-09-14T09:00:00Z",
+                    }
+                ],
+            },
+        },
+    )
     intake = call(
         "客服进线聚合",
         "POST",
         "/v1/agent/intakes",
         201,
         json={
+            "source_conversation_id": "upstream-smoke-002",
             "customer_id": "customer-smoke-001",
             "current_message": "快递还没收到，我很着急",
             "transcript": [],
@@ -53,6 +76,20 @@ def run_demo_smoke() -> list[tuple[str, int, str]]:
             ],
             "historical_tickets": [],
         },
+    )
+    intake_conversation_id = intake["event"]["conversation_id"]
+    call(
+        "采纳 AI 回复草稿",
+        "POST",
+        f"/v1/agent/conversations/{intake_conversation_id}/suggestion-feedback",
+        201,
+        json={"decision": "adopted"},
+    )
+    call(
+        "更新风险跟踪",
+        "PATCH",
+        f"/v1/agent/conversations/{intake_conversation_id}/risk",
+        json={"status": "monitoring", "note": "客服已开始核对物流信息"},
     )
     conversation = call(
         "消费者开始排查",
@@ -145,6 +182,8 @@ def run_demo_smoke() -> list[tuple[str, int, str]]:
     )
 
     assert mock["state"] == "ASK"
+    assert agent_mock["provider"] == "deterministic_agent_mock"
+    assert agent_mock["empathy_understanding"]["historical_promises"]
     assert intake["conversation"]["assistant_brief"]["escalation_target"] == "logistics"
     assert conversation["state"] == "ASK" and guide["state"] == "GUIDE"
     assert case["current_revision"] == 2 and updated_attempt["outcome"] == "improved"
