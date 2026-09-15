@@ -1,17 +1,10 @@
 from __future__ import annotations
 
-import re
 from datetime import timedelta
 from uuid import uuid4
 
 from loreal_ai_service_intelligence.config import Settings
-from loreal_ai_service_intelligence.intent import (
-    FallbackIntentProvider,
-    IntentProvider,
-    RuleBasedIntentProvider,
-)
-from loreal_ai_service_intelligence.knowledge import InMemoryKnowledgeBase, KnowledgeProvider
-from loreal_ai_service_intelligence.models import (
+from loreal_ai_service_intelligence.domain.models import (
     AgentConversationView,
     AttemptCreateRequest,
     AttemptRecord,
@@ -20,8 +13,10 @@ from loreal_ai_service_intelligence.models import (
     CaseRevision,
     CaseRevisionRequest,
     ConsumerResponse,
+    ConsumerTicketView,
     ConversationRequest,
     ConversationState,
+    ConversationTranscriptItem,
     EmpathyCard,
     EventSummary,
     HandoffPackage,
@@ -31,12 +26,23 @@ from loreal_ai_service_intelligence.models import (
     TicketRecord,
     TicketResultRequest,
 )
-from loreal_ai_service_intelligence.repository import StorageRepository, utc_now
-
-HIGH_RISK_TERMS = ("刺痛", "泛红", "红肿", "呼吸困难", "灼痛", "过敏")
-NEGATION_PREFIXES = ("没有", "没", "不", "未", "无")
-HYPOTHETICAL_PREFIXES = ("会不会", "是否会", "会否", "怕", "担心")
-RESOLVED_TERMS = ("已经好了", "已恢复", "现在好了", "已消退")
+from loreal_ai_service_intelligence.infrastructure.repository import StorageRepository, utc_now
+from loreal_ai_service_intelligence.providers.intent import (
+    FallbackIntentProvider,
+    RuleBasedIntentProvider,
+)
+from loreal_ai_service_intelligence.providers.interfaces import (
+    DecisionPolicy,
+    IntentProvider,
+    KnowledgeProvider,
+    ResponseProvider,
+)
+from loreal_ai_service_intelligence.providers.knowledge import InMemoryKnowledgeBase
+from loreal_ai_service_intelligence.providers.safety import RuleBasedSafetyPolicy
+from loreal_ai_service_intelligence.services.decision_policy import (
+    DeterministicDecisionPolicy,
+    SafetyFirstDecisionPolicy,
+)
 
 
 class ConversationOrchestrator:
@@ -46,15 +52,23 @@ class ConversationOrchestrator:
         settings: Settings,
         intent_provider: IntentProvider | None = None,
         knowledge_provider: KnowledgeProvider | None = None,
+        decision_policy: DecisionPolicy | None = None,
+        response_provider: ResponseProvider | None = None,
     ) -> None:
         self.repository = repository
         self.settings = settings
-        self.knowledge = knowledge_provider or InMemoryKnowledgeBase(settings.knowledge_version)
-        self.intent_provider = FallbackIntentProvider(
+        knowledge = knowledge_provider or InMemoryKnowledgeBase(settings.knowledge_version)
+        intent = FallbackIntentProvider(
             intent_provider,
             RuleBasedIntentProvider(),
             settings.intent_minimum_confidence,
         )
+        safety = RuleBasedSafetyPolicy()
+        delegate = decision_policy or DeterministicDecisionPolicy(
+            settings, intent, knowledge, safety
+        )
+        self.decision_policy = SafetyFirstDecisionPolicy(delegate, safety, settings.schema_version)
+        self.response_provider = response_provider
 
     def start(self, request: ConversationRequest) -> ConsumerResponse:
         conversation_id = f"conv_{uuid4().hex}"
@@ -66,7 +80,46 @@ class ConversationOrchestrator:
         existing = self.repository.get_conversation(conversation_id)
         if existing is None:
             return None
+        if existing.ticket is not None and existing.ticket.status != "resolved":
+            return self._continue_agent_conversation(existing, request)
         return self._process(conversation_id, request, existing)
+
+    def _continue_agent_conversation(
+        self, conversation: StoredConversation, request: ConversationRequest
+    ) -> ConsumerResponse:
+        now = utc_now()
+        result_id = f"result_{uuid4().hex}"
+        conversation.messages.append(request.message)
+        conversation.transcript.append(
+            ConversationTranscriptItem(role="user", content=request.message, created_at=now)
+        )
+        retained_state = (
+            ConversationState.BLOCK
+            if conversation.state == ConversationState.BLOCK
+            else ConversationState.HANDOFF
+        )
+        conversation.state = retained_state
+        conversation.empathy_card.next_state = retained_state
+        conversation.last_result_id = result_id
+        conversation.ticket.status = "waiting_for_agent"
+        conversation.ticket.updated_at = now
+        conversation.updated_at = now
+        self.repository.save_conversation(conversation)
+        self.repository.add_audit(
+            conversation.conversation_id,
+            "consumer_message_forwarded",
+            {"ticket_id": conversation.ticket.ticket_id},
+        )
+        event = self.repository.get_event_for_conversation(conversation.conversation_id)
+        return ConsumerResponse(
+            conversation_id=conversation.conversation_id,
+            result_id=result_id,
+            state=retained_state,
+            message="消息已同步给人工客服，请等待客服回复。",
+            available_actions=["view_ticket", "reply"],
+            event_id=str(event["event_id"]) if event else None,
+            event_status="waiting_for_agent",
+        )
 
     def _process(
         self,
@@ -76,13 +129,37 @@ class ConversationOrchestrator:
     ) -> ConsumerResponse:
         now = utc_now()
         messages = [*existing.messages, request.message] if existing else [request.message]
-        card = self._build_card(conversation_id, request, existing)
+        card = EmpathyCard.model_validate(
+            self.decision_policy.decide(conversation_id, request, existing)
+        )
         result_id = f"result_{uuid4().hex}"
-        response_text, actions = self._consumer_copy(card)
+        fallback_text, actions = self._consumer_copy(card)
+        response_text = fallback_text
+        if self.response_provider is not None and card.next_state in {
+            ConversationState.ASK,
+            ConversationState.GUIDE,
+            ConversationState.RESOLVE,
+        }:
+            try:
+                response_text = self.response_provider.generate(request, card, existing)
+            except Exception as error:  # provider 失败不得中断消费者主链路
+                self.repository.add_audit(
+                    conversation_id,
+                    "response_provider_fallback",
+                    {"error_type": type(error).__name__},
+                )
+        transcript = list(existing.transcript) if existing else []
+        transcript.extend(
+            [
+                ConversationTranscriptItem(role="user", content=request.message, created_at=now),
+                ConversationTranscriptItem(role="assistant", content=response_text, created_at=now),
+            ]
+        )
         stored = StoredConversation(
             conversation_id=conversation_id,
             state=card.next_state,
             messages=messages,
+            transcript=transcript,
             empathy_card=card,
             last_result_id=result_id,
             unresolved_attempts=(existing.unresolved_attempts if existing else 0)
@@ -106,6 +183,9 @@ class ConversationOrchestrator:
                 "result_id": result_id,
             },
         )
+        event = None
+        if card.next_state in {ConversationState.HANDOFF, ConversationState.BLOCK}:
+            event = self.create_handoff(conversation_id, "automatic-ai-handoff")
         return ConsumerResponse(
             conversation_id=conversation_id,
             result_id=result_id,
@@ -117,118 +197,22 @@ class ConversationOrchestrator:
                 else []
             ),
             available_actions=actions,
-        )
-
-    def _build_card(
-        self,
-        conversation_id: str,
-        request: ConversationRequest,
-        existing: StoredConversation | None,
-    ) -> EmpathyCard:
-        text = request.message
-        risk_terms = self._active_risk_terms(text)
-        confirmed = list(
-            dict.fromkeys(
-                [*(existing.empathy_card.confirmed_facts if existing else []), request.message]
-            )
-        )
-        entities = dict(existing.empathy_card.entities) if existing else {}
-        if request.product:
-            entities["product"] = request.product
-        if request.order_reference:
-            entities["order_reference"] = request.order_reference
-
-        if request.attachments:
-            state = ConversationState.HANDOFF
-            risk = RiskLevel.LOW
-            missing = ["可读取的附件内容"]
-            refs = []
-            intent_result = self.intent_provider.classify(text)
-            intent = intent_result.intent
-            intent_confidence = intent_result.confidence
-            intent_source = intent_result.source
-        elif risk_terms:
-            state = ConversationState.BLOCK
-            risk = RiskLevel.HIGH
-            missing: list[str] = []
-            refs = []
-            intent = Intent.COMPLAINT
-            intent_confidence = 1.0
-            intent_source = "safety_rules"
-        elif self._needs_pilling_details(text, existing):
-            state = ConversationState.ASK
-            risk = RiskLevel.LOW
-            missing = ["搓泥发生步骤或已经尝试过的方法"]
-            refs = []
-            intent = Intent.USAGE
-            intent_confidence = 1.0
-            intent_source = "pilling_clarification_rules"
-        elif self._needs_shade_details(text, existing):
-            state = ConversationState.ASK
-            risk = RiskLevel.LOW
-            missing = ["肤色冷暖调或期望妆效"]
-            refs = []
-            intent = Intent.PURCHASE
-            intent_confidence = 1.0
-            intent_source = "clarification_rules"
-        else:
-            intent_result = self.intent_provider.classify(text)
-            if (
-                existing
-                and intent_result.intent == Intent.CONSULT
-                and intent_result.confidence < self.settings.intent_minimum_confidence
-            ):
-                intent = existing.empathy_card.intent
-                intent_confidence = existing.empathy_card.intent_confidence
-                intent_source = f"context:{existing.empathy_card.intent_source}"
-            else:
-                intent = intent_result.intent
-                intent_confidence = intent_result.confidence
-                intent_source = intent_result.source
-            if self._is_pilling_context(text, existing) and existing:
-                refs = self.knowledge.search(
-                    f"{existing.case.original_statement} {text}", Intent.USAGE
-                )
-            else:
-                refs = self.knowledge.search(text, intent)
-            if not refs and existing and existing.empathy_card.intent == Intent.PURCHASE:
-                context_query = f"{existing.empathy_card.surface_issue} {text}"
-                refs = self.knowledge.search(context_query, Intent.PURCHASE)
-            missing = []
-            risk = RiskLevel.LOW
-            state = (
-                ConversationState.GUIDE
-                if refs and self._is_pilling_context(text, existing)
-                else (ConversationState.RESOLVE if refs else ConversationState.HANDOFF)
-            )
-
-        return EmpathyCard(
-            conversation_id=conversation_id,
-            surface_issue=request.message,
-            intent=intent,
-            intent_confidence=intent_confidence,
-            intent_source=intent_source,
-            emotion="concerned" if risk_terms else None,
-            scenario=self._scenario(intent),
-            entities=entities,
-            confirmed_facts=confirmed,
-            inferences=[],
-            missing_information=missing,
-            risk_level=risk,
-            risk_reasons=[f"命中高风险症状词：{term}" for term in risk_terms],
-            knowledge_refs=refs,
-            next_state=state,
-            schema_version=self.settings.schema_version,
+            event_id=event.event_id if event else None,
+            event_status=event.status if event else None,
+            estimated_response_at=event.estimated_response_at if event else None,
         )
 
     @staticmethod
     def _consumer_copy(card: EmpathyCard) -> tuple[str, list[str]]:
         if card.next_state == ConversationState.BLOCK:
             return (
-                "你提到的情况需要谨慎处理。请先停止继续使用相关产品，避免自行叠加其他刺激性产品；如症状明显、持续或加重，请及时寻求专业医疗帮助。是否同意我将现有信息提交给人工客服跟进？",
-                ["confirm_handoff", "decline_handoff"],
+                "你提到的情况需要谨慎处理。请先停止继续使用相关产品，避免自行叠加其他刺激性产品；"
+                "如症状明显、持续或加重，请及时寻求专业医疗帮助。现有沟通内容已自动提交给人工客服跟进。",
+                ["view_ticket"],
             )
         if card.next_state == ConversationState.ASK:
+            if card.intent_source == "user_decline_handoff_rules":
+                return "好的，暂不转人工。请继续描述你希望 AI 帮你解决的具体问题。", ["reply"]
             if "搓泥发生步骤或已经尝试过的方法" in card.missing_information:
                 return (
                     "为了只调整一个条件，请告诉我搓泥发生在哪一步，以及你已经试过什么方法；不确定也可以跳过。",
@@ -240,18 +224,18 @@ class ConversationOrchestrator:
                 )
             return "为了更准确地给出建议，请告诉我你的肤色冷暖调，或你偏好的妆效。", ["reply"]
         if card.next_state == ConversationState.HANDOFF:
+            if card.intent_source == "user_handoff_rules":
+                return "已按你的选择转接人工客服，之前的沟通内容会一并同步。", ["view_ticket"]
             if "可读取的附件内容" in card.missing_information:
                 message = (
                     "我目前无法读取你上传的附件内容，因此不会根据文件名猜测。"
-                    "是否同意转人工客服查看并跟进？"
+                    "现有沟通内容已自动提交给人工客服查看并跟进。"
                 )
                 return message, [
-                    "confirm_handoff",
-                    "decline_handoff",
+                    "view_ticket",
                 ]
-            return "当前没有足够的已审核依据来安全回答。是否同意我将现有信息提交给人工客服跟进？", [
-                "confirm_handoff",
-                "decline_handoff",
+            return "当前没有足够的已审核依据来安全回答，现有沟通内容已自动提交给人工客服跟进。", [
+                "view_ticket",
             ]
         labels = {
             Intent.USAGE: "使用指引",
@@ -283,19 +267,6 @@ class ConversationOrchestrator:
             revisions=[revision],
         )
 
-    @staticmethod
-    def _is_pilling_context(text: str, existing: StoredConversation | None) -> bool:
-        return any(term in text for term in ("搓泥", "起屑", "结块")) or bool(
-            existing
-            and any(term in existing.case.original_statement for term in ("搓泥", "起屑", "结块"))
-        )
-
-    def _needs_pilling_details(self, text: str, existing: StoredConversation | None) -> bool:
-        if not self._is_pilling_context(text, existing) or existing is not None:
-            return False
-        detail_terms = ("防晒后", "护肤后", "妆前后", "试过", "减少", "等待", "发生在")
-        return not any(term in text for term in detail_terms)
-
     def revise_case(self, conversation_id: str, request: CaseRevisionRequest) -> CaseRecord | None:
         conversation = self.repository.get_conversation(conversation_id)
         if conversation is None or conversation.case is None:
@@ -310,6 +281,8 @@ class ConversationOrchestrator:
         )
         conversation.case.revisions.append(revision)
         conversation.case.current_revision = revision.revision
+        conversation.empathy_card.case_revision = revision.revision
+        conversation.empathy_card.entities.update(request.facts)
         conversation.updated_at = utc_now()
         self.repository.save_conversation(conversation)
         self.repository.add_audit(
@@ -403,68 +376,41 @@ class ConversationOrchestrator:
         )
         return conversation.ticket
 
-    @staticmethod
-    def _active_risk_terms(text: str) -> list[str]:
-        resolved_history = any(term in text for term in RESOLVED_TERMS)
-        renewed_symptom = any(term in text for term in ("但是", "但", "不过", "又", "仍", "现在还"))
-        if resolved_history and not renewed_symptom:
-            return []
-        found: list[str] = []
-        for term in HIGH_RISK_TERMS:
-            index = text.find(term)
-            if index < 0:
-                continue
-            prefix = text[max(0, index - 4) : index]
-            non_assertive = (*NEGATION_PREFIXES, *HYPOTHETICAL_PREFIXES)
-            if any(prefix.endswith(marker) for marker in non_assertive):
-                continue
-            context = text[max(0, index - 12) : index]
-            third_party = re.search(
-                r"(?:朋友|同事|家人)(?:说|有|出现|使用后|用了以后)?[^，。！？]*$"
-                r"|(?:^|[，。！？])(?:他|她)(?:说|有|出现|使用后|用了以后)[^，。！？]*$",
-                context,
-            )
-            if third_party:
-                continue
-            found.append(term)
-        return found
-
-    @staticmethod
-    def _needs_shade_details(text: str, existing: StoredConversation | None) -> bool:
-        shade_context = "色号" in text or bool(
-            existing and existing.empathy_card.intent == Intent.PURCHASE
+    def consumer_ticket_view(self, conversation_id: str) -> ConsumerTicketView | None:
+        conversation = self.repository.get_conversation(conversation_id)
+        if conversation is None or conversation.ticket is None:
+            return None
+        replies = [
+            item.get("note")
+            for item in conversation.ticket.result_events
+            if item.get("event") == "agent_replied" and item.get("note")
+        ]
+        return ConsumerTicketView(
+            conversation_id=conversation_id,
+            status=conversation.ticket.status,
+            latest_agent_reply=str(replies[-1]) if replies else None,
+            updated_at=conversation.ticket.updated_at,
         )
-        if not shade_context:
+
+    def append_agent_message(self, conversation_id: str, message: str) -> bool:
+        conversation = self.repository.get_conversation(conversation_id)
+        if conversation is None or conversation.ticket is None or not message.strip():
             return False
-        informative = (
-            "冷调",
-            "暖调",
-            "中性调",
-            "黄一白",
-            "黄二白",
-            "粉一白",
-            "自然",
-            "白皙",
-            "遮瑕",
+        now = utc_now()
+        conversation.transcript.append(
+            ConversationTranscriptItem(role="agent", content=message.strip(), created_at=now)
         )
-        unknown = ("不知道", "不清楚", "不会判断")
-        has_details = any(term in text for term in informative)
-        explicitly_unknown = any(term in text for term in unknown)
-        return not has_details or explicitly_unknown
-
-    @staticmethod
-    def _scenario(intent: Intent) -> str:
-        return {
-            Intent.AFTER_SALES: "after_sales_service",
-            Intent.PURCHASE: "product_selection",
-            Intent.USAGE: "product_usage",
-            Intent.COMPLAINT: "customer_complaint",
-        }.get(intent, "product_consultation")
+        conversation.updated_at = now
+        self.repository.save_conversation(conversation)
+        return True
 
     def create_handoff(self, conversation_id: str, idempotency_key: str) -> EventSummary | None:
         conversation = self.repository.get_conversation(conversation_id)
         if conversation is None:
             return None
+        if conversation.ticket is not None:
+            existing_event = self.repository.get_event_for_conversation(conversation_id)
+            return self._event_summary(existing_event) if existing_event else None
         eta = utc_now() + timedelta(minutes=self.settings.handoff_eta_minutes)
         event = self.repository.create_event(
             {
@@ -478,8 +424,9 @@ class ConversationOrchestrator:
             },
             idempotency_key,
         )
-        conversation.state = ConversationState.HANDOFF
-        conversation.empathy_card.next_state = ConversationState.HANDOFF
+        if conversation.state != ConversationState.BLOCK:
+            conversation.state = ConversationState.HANDOFF
+            conversation.empathy_card.next_state = ConversationState.HANDOFF
         conversation.updated_at = utc_now()
         if conversation.ticket is None:
             now = utc_now()
@@ -521,7 +468,16 @@ class ConversationOrchestrator:
         package = HandoffPackage(
             conversation_id=conversation_id,
             original_messages=conversation.messages,
-            summary=card.surface_issue,
+            transcript=conversation.transcript,
+            summary=" → ".join(conversation.messages),
+            handoff_reason=(
+                "用户在对话中明确选择人工客服"
+                if card.intent_source == "user_handoff_rules"
+                else "；".join(card.risk_reasons or card.missing_information)
+                or "AI 无法基于当前已审核知识可靠回答"
+            ),
+            case=conversation.case,
+            attempts=conversation.attempts,
             confirmed_facts=card.confirmed_facts,
             inferences=card.inferences,
             missing_information=card.missing_information,

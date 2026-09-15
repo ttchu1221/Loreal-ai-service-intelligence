@@ -8,18 +8,68 @@ fallback，可在没有外部 LLM 的情况下运行完整演示流程。
 
 - Python 3.9+
 
-## 本地开发
+## 快速开始
 
 ```bash
 scripts/bootstrap.sh
-scripts/mongo-dev.sh  # 在独立 terminal 启动 MongoDB
-scripts/dev.sh
+scripts/demo-start.sh
+```
+
+首次运行 `bootstrap.sh` 会创建 `.venv`、安装 dependency，并由 `config/local.example` 创建不会被
+Git 追踪的根目录 `.env`。该 `.env` 只保存可选 LLM 接入配置，其他功能使用代码默认值；
+`demo-start.sh` 会启动或复用本地 MongoDB、启动 API，并在 macOS 自动打开消费者端和客服端页面；
+按 `Ctrl+C` 可停止本次启动的进程。
+
+如果需要分别启动：
+
+```bash
+scripts/mongo-dev.sh  # terminal 1
+scripts/dev.sh        # terminal 2
 ```
 
 服务启动后可访问：
 
+- 消费者端：<http://127.0.0.1:8000/workspace/consumer>
+- 人工客服端：<http://127.0.0.1:8000/workspace/agent>
 - 健康检查：<http://127.0.0.1:8000/health>
 - API 文档：<http://127.0.0.1:8000/docs>
+
+建议演示流程：消费者端发起“底妆搓泥”咨询，补充一个关键条件，执行单条件建议并记录结果，然后确认
+需要人工时由 AI/安全规则自动建单；客服端从自动刷新的队列查看双方已沟通内容、确认事实、尝试记录
+和转人工原因，发送人工回复并记录动作完成；消费者端会自动显示回复，
+并由消费者本人确认已解决或仍需处理。
+
+完整的首次安装、启动故障排查和逐步演示操作见
+[开发与演示指南](docs/development.md)。
+
+## 界面预览
+
+消费者端提供多轮 AI 咨询、主动转人工、服务进度、人工回复同步和问题结果确认：
+
+![消费者对话工作区](docs/images/consumer-workspace.png)
+
+人工客服端提供待处理队列、双方共享对话、AI 交接摘要、回复和关闭会话操作；关闭后会话移出队列，
+消费者选择“仍需处理”后会重新进入待处理队列：
+
+![人工客服工作台](docs/images/agent-workspace.png)
+
+## 接入 LLM
+
+真实模型通过 OpenAI-compatible adapter 参与意图理解和安全边界内的上下文话术生成。把以下值写入本地 `.env`，不要写进
+`config/*.example`，也不要 commit：
+
+```dotenv
+LLM_ENABLED=true
+LLM_API_KEY=your-runtime-secret
+LLM_BASE_URL=https://your-provider.example/v1
+LLM_MODEL=your-approved-model
+```
+
+timeout 和 retry 直接使用代码默认值。保存后重新运行 `scripts/demo-start.sh`。LLM 会结合最近对话、
+当前意图、状态与已审核知识生成 `ASK`、`GUIDE`、`RESOLVE` 回复；`BLOCK` 和 `HANDOFF` 仍使用
+确定性安全话术。模型输出非法或调用失败时自动回退模板。
+最终状态、安全判断和持久化仍由 backend 控制，真实 RAG 尚未接入。详细配置和 fallback 见
+[Configuration](docs/configuration.md)。
 
 ## 已实现能力
 
@@ -48,10 +98,23 @@ scripts/dev.sh
 scripts/check.sh
 ```
 
+演示前全链路模拟：
+
+```bash
+.venv/bin/python scripts/demo_smoke.py
+```
+
 ## 项目结构
 
 ```text
-src/loreal_ai_service_intelligence/  # 应用代码
+src/loreal_ai_service_intelligence/
+├── api/              # FastAPI application、route 与 Mock HTTP contract
+├── domain/           # Pydantic domain model，不依赖 transport/provider
+├── services/         # 会话状态机与业务编排
+├── providers/        # LLM intent、上下文回复与知识检索边界和默认实现
+├── infrastructure/   # MongoDB/Memory repository adapter
+├── config.py         # 类型化 runtime settings
+└── cli.py            # 本地 ASGI 启动入口
 tests/                               # 自动化测试
 docs/                                # 详细项目文档
 config/                              # environment 配置
@@ -71,6 +134,6 @@ config、data、sandbox 和 scripts 的完整说明见
 ## 当前边界
 
 内置规则与知识仅用于 deterministic demo，不代表 production 模型效果、真实商品知识或正式客服
-SLA。上线前仍需接入真实 LLM/RAG、认证与 RBAC、文件处理、订单/售后系统、通知 webhook、分页、
+SLA。上线前仍需完成真实 RAG、认证与 RBAC、文件处理、订单/售后系统、通知 webhook、分页、
 事件认领和并发控制；具体风险和接入顺序见
 [Backend Architecture](docs/architecture.md#production-接入路线)。

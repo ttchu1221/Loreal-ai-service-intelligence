@@ -1,14 +1,14 @@
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from loreal_ai_service_intelligence.config import Settings
-from loreal_ai_service_intelligence.main import create_app
-from loreal_ai_service_intelligence.mock_api import (
+from loreal_ai_service_intelligence.api.application import create_app
+from loreal_ai_service_intelligence.api.mock import (
     MockDecisionRequest,
     MockDecisionService,
     create_mock_router,
 )
-from loreal_ai_service_intelligence.repository import MemoryRepository
+from loreal_ai_service_intelligence.config import Settings
+from loreal_ai_service_intelligence.infrastructure.repository import MemoryRepository
 
 
 def make_client() -> TestClient:

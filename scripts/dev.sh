@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 source "${SCRIPT_DIR}/common.sh"
 require_venv
 
-CONFIG_FILE="${1:-${PROJECT_ROOT}/config/development.env}"
+CONFIG_FILE="${1:-${PROJECT_ROOT}/.env}"
 if [[ ! -f "${CONFIG_FILE}" ]]; then
   log_error "config 文件不存在: ${CONFIG_FILE}"
   exit 1

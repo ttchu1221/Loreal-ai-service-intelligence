@@ -5,6 +5,9 @@
 
 ## 消费者端
 
+- `GET /v1/conversations/{conversation_id}`：恢复消费者会话当前状态、最新 `result_id` 以及按时间排列的
+  user/assistant transcript。消费者 workspace 刷新后使用该接口重建对话；不存在的历史会话返回 `404`。
+
 ### 发起和继续咨询
 
 `POST /v1/conversations` 创建会话，`POST /v1/conversations/{conversation_id}/messages`
@@ -44,24 +47,42 @@ response 只包含消费者可见的自然语言、状态、依据与可执行�
 
 ### 人工交接和反馈
 
-- `POST /v1/conversations/{conversation_id}/handoff`：记录用户是否同意转人工；同意时使用
-  `idempotency_key` 幂等创建服务事件。
+- AI/规则状态机判定为 `HANDOFF` 或 `BLOCK` 时，会自动、幂等创建服务事件，消费者响应直接返回
+  `event_id`、`event_status` 和预计响应时间，无需再次点击确认。
+- 用户可直接在对话中表达“转人工”“人工客服”“找客服”等选择，此意图优先于普通澄清问题并立即
+  建单；若用户没有选择人工，可回答时继续 AI 流程，仅在已审核知识无法可靠回答或安全规则阻断时
+  自动建单。
+- Ticket 建立后，后续 `messages` 请求会追加消费者消息到共享 transcript，不再重新调用 AI
+  决策；普通人工会话保持 `HANDOFF`，高风险会话保持 `BLOCK`。
+- `POST /v1/conversations/{conversation_id}/handoff`：保留给消费者主动要求人工的兼容入口，使用
+  `idempotency_key` 幂等创建服务事件；如果已经自动建单，则返回现有事件，不重复创建。
 - `GET /v1/events/{event_id}`：查看等待接管、处理中或已完成状态及演示预计响应时间。
+- `GET /v1/conversations/{conversation_id}/ticket`：消费者轮询人工服务进度，并读取最新一条人工
+  回复；不会暴露内部审计与客服操作明细。
+- `POST /v1/conversations/{conversation_id}/ticket/results`：由消费者确认已解决或反馈仍需处理；
+  该入口不接受伪造人工回复或客服动作完成事件。
 - `POST /v1/conversations/{conversation_id}/feedback`：把是否解决和开放反馈绑定到最新
   `result_id`。反馈只进入待分析数据，不自动训练模型或修改风险规则。
 
 ## 人工客服工作台
 
 - `GET /v1/agent/events`：按风险优先级和等待时间返回事件队列。
-- `GET /v1/agent/conversations/{conversation_id}`：返回消费者原话、共情卡、事实与推断、缺失
-  信息、风险、知识依据、建议下一步和审计轨迹。
+  已关闭或由消费者确认解决的事件不再出现在待处理队列；消费者选择“仍需处理”后会重新入队。
+- `GET /v1/agent/conversations/{conversation_id}`：返回消费者原话、包含 `user`、`assistant`、
+  `agent` role 的完整 transcript、共情卡、事实与推断、缺失信息、风险、知识依据、Case 修订、
+  建议执行结果、自动转人工原因、建议下一步和审计轨迹。
 - `POST /v1/agent/events/{event_id}/actions`：记录回复、索要材料、建立售后记录、升级专家或关闭
-  事件。鉴权接入前审计主体明确记录为 `unauthenticated_agent_api`；生产环境必须用认证身份替换。
+  事件。`reply` 必须提供非空 `parameters.note`，并会把回复写入共享 transcript；`close` 将事件标为
+  `completed` 并移出待处理队列，但保留 Ticket、transcript 和审计。鉴权接入前审计
+  主体明确记录为 `unauthenticated_agent_api`；生产环境必须用认证身份替换。
 - `POST /v1/agent/conversations/{conversation_id}/ticket/results`：分别记录人工回复、动作完成、
   用户确认解决或重开；这些结果不会相互冒充。
 
 `GET /workspace/consumer` 和 `GET /workspace/agent` 提供无额外 frontend dependency 的最小可运行
-工作区，用于联调消费者输入和人工队列。它们不包含 production 登录能力。
+工作区，用于联调消费者输入和人工队列。消费者端每两秒同步 Ticket，并把人工回复显示为客服消息
+气泡；客服端以聊天气泡显示双方完整对话，每三秒刷新队列和当前会话、自动打开首个新 Ticket，并将
+UTC 时间转换为浏览器本地时间。客服可在处理结束后关闭会话；人工回复/动作由客服提交，解决确认/
+继续处理由消费者提交。它们不包含 production 登录能力。
 
 ## AI Mock 接口
 
@@ -71,6 +92,18 @@ effect；风险与售后优先于普通 GUIDE，两次执行无改善后返回 `
 事实。完整字段和示例见[系统架构与技术接口](system-architecture-and-interfaces.md#ai-mock-输入合同)。
 
 development 和 test 默认启用；production 的 `MOCK_API_ENABLED=false`，访问时返回 `404`。
+
+## LLM provider
+
+设置 `LLM_ENABLED=true` 并提供 `LLM_API_KEY`、`LLM_BASE_URL` 和 `LLM_MODEL` 后，application factory
+会注入 OpenAI-compatible adapter。它调用 `/chat/completions`：intent 输出必须通过 Schema 校验；
+普通消费者回复会结合最近八条对话、当前消息、固定状态和审核知识生成。模型无权改变决策状态，
+`BLOCK`/`HANDOFF` 保持确定性话术，任何生成失败都会回退模板。
+intent 阶段返回 `intent` 与 `confidence`；timeout、network error、非法 JSON、非法字段或低置信度会回退到
+rule-based provider。高风险判断在候选 provider 之前执行，模型结果不能直接写数据库或创建 Ticket。
+
+这不是 RAG 接入；当前状态机与内置演示知识仍由 backend 控制，完整配置见
+[Configuration](configuration.md#llm-adapter)。
 
 ## 品牌洞察
 
@@ -95,6 +128,7 @@ development 和 test 默认启用；production 的 `MOCK_API_ENABLED=false`，�
 
 - 附件二进制上传、图片识别、语音转文字和真实文件存储。
 - 订单/售后系统、企业登录或 SSO、消息通知和客服 webhook。
+- 真实 RAG、消费者回复生成、AI 客服草稿和模型效果评测。
 - 客服队列分页、事件认领、RBAC、optimistic locking 和多人并发冲突处理。
 
 这些能力尚未选定 vendor。当前 API 只保留业务边界，不宣称 external service 已接入。

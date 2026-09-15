@@ -1,6 +1,6 @@
 from fastapi.testclient import TestClient
 
-from loreal_ai_service_intelligence.main import app
+from loreal_ai_service_intelligence.api.application import app
 
 client = TestClient(app)
 

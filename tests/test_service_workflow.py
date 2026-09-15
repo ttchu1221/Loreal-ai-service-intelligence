@@ -1,13 +1,26 @@
 from fastapi.testclient import TestClient
 from pymongo.errors import ConnectionFailure
 
-from loreal_ai_service_intelligence.main import create_app
-from loreal_ai_service_intelligence.repository import MemoryRepository
+from loreal_ai_service_intelligence.api.application import create_app
+from loreal_ai_service_intelligence.infrastructure.repository import MemoryRepository
 
 
 def make_client(tmp_path) -> TestClient:
     del tmp_path
     return TestClient(create_app(MemoryRepository()))
+
+
+class ContextAwareResponseProvider:
+    def generate(self, request, card, existing):
+        previous = existing.messages[-1] if existing else "首次咨询"
+        context = f"我理解你这次说的是“{request.message}”，并结合了“{previous}”"
+        return f"{context}（{card.next_state.value}）。"
+
+
+class FailingResponseProvider:
+    def generate(self, request, card, existing):
+        del request, card, existing
+        raise TimeoutError("model timeout")
 
 
 def test_low_risk_usage_question_resolves_with_traceable_evidence(tmp_path) -> None:
@@ -21,6 +34,107 @@ def test_low_risk_usage_question_resolves_with_traceable_evidence(tmp_path) -> N
     assert body["evidence"][0]["knowledge_id"] == "KB-USAGE-001"
     assert "intent" not in body
     assert "risk_level" not in body
+    assert body["event_id"] is None
+    assert client.get("/v1/agent/events").json() == []
+
+
+def test_response_provider_uses_current_message_and_conversation_context(tmp_path) -> None:
+    del tmp_path
+    client = TestClient(
+        create_app(MemoryRepository(), response_provider=ContextAwareResponseProvider())
+    )
+    first = client.post("/v1/conversations", json={"message": "粉底有点搓泥"}).json()
+    second = client.post(
+        f"/v1/conversations/{first['conversation_id']}/messages",
+        json={"message": "主要发生在涂完防晒之后"},
+    ).json()
+
+    assert "主要发生在涂完防晒之后" in second["message"]
+    assert "粉底有点搓泥" in second["message"]
+    assert second["state"] == "GUIDE"
+
+
+def test_response_provider_failure_falls_back_without_breaking_flow(tmp_path) -> None:
+    del tmp_path
+    client = TestClient(create_app(MemoryRepository(), response_provider=FailingResponseProvider()))
+
+    body = client.post("/v1/conversations", json={"message": "第一次使用面霜，应该怎么用？"}).json()
+
+    assert body["state"] == "RESOLVE"
+    assert "根据已审核的使用指引" in body["message"]
+
+
+def test_block_response_never_calls_generative_provider(tmp_path) -> None:
+    del tmp_path
+    client = TestClient(create_app(MemoryRepository(), response_provider=FailingResponseProvider()))
+
+    body = client.post("/v1/conversations", json={"message": "用了以后呼吸困难"}).json()
+
+    assert body["state"] == "BLOCK"
+    assert "停止继续使用" in body["message"]
+
+
+def test_consumer_can_restore_complete_transcript_after_refresh(tmp_path) -> None:
+    client = make_client(tmp_path)
+    first = client.post("/v1/conversations", json={"message": "我的底妆总是搓泥，怎么办？"}).json()
+    second = client.post(
+        f"/v1/conversations/{first['conversation_id']}/messages",
+        json={"message": "发生在涂粉底后，我已经试过换粉扑"},
+    ).json()
+
+    restored = client.get(f"/v1/conversations/{first['conversation_id']}")
+
+    assert restored.status_code == 200
+    body = restored.json()
+    assert body["last_result_id"] == second["result_id"]
+    assert [item["role"] for item in body["transcript"]] == [
+        "user",
+        "assistant",
+        "user",
+        "assistant",
+    ]
+    assert body["transcript"][0]["content"] == "我的底妆总是搓泥，怎么办？"
+    assert body["transcript"][-1]["content"] == second["message"]
+
+
+def test_consumer_restore_returns_404_for_unknown_conversation(tmp_path) -> None:
+    client = make_client(tmp_path)
+
+    response = client.get("/v1/conversations/missing")
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "conversation not found"}
+
+
+def test_explicit_human_request_overrides_normal_ai_clarification(tmp_path) -> None:
+    client = make_client(tmp_path)
+
+    response = client.post(
+        "/v1/conversations", json={"message": "我的粉底搓泥，但我现在选择人工客服"}
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["state"] == "HANDOFF"
+    assert body["event_status"] == "waiting_for_agent"
+    assert "按你的选择" in body["message"]
+    package = client.get(f"/v1/agent/conversations/{body['conversation_id']}").json()[
+        "handoff_package"
+    ]
+    assert package["handoff_reason"] == "用户在对话中明确选择人工客服"
+
+
+def test_explicit_handoff_decline_does_not_create_ticket(tmp_path) -> None:
+    client = make_client(tmp_path)
+
+    response = client.post("/v1/conversations", json={"message": "我暂不转人工，继续让 AI 帮我"})
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["state"] == "ASK"
+    assert body["event_id"] is None
+    assert "暂不转人工" in body["message"]
+    assert client.get("/v1/agent/events").json() == []
 
 
 def test_shade_question_asks_once_then_resolves_without_repeating_fact(tmp_path) -> None:
@@ -49,7 +163,8 @@ def test_high_risk_flow_blocks_recommendation_and_creates_idempotent_handoff(tmp
     assert blocked["state"] == "BLOCK"
     assert blocked["evidence"] == []
     assert "停止继续使用" in blocked["message"]
-    assert "confirm_handoff" in blocked["available_actions"]
+    assert blocked["available_actions"] == ["view_ticket"]
+    assert blocked["event_status"] == "waiting_for_agent"
 
     path = f"/v1/conversations/{blocked['conversation_id']}/handoff"
     payload = {"accepted": True, "idempotency_key": "risk-case-001"}
@@ -64,6 +179,7 @@ def test_high_risk_flow_blocks_recommendation_and_creates_idempotent_handoff(tmp
     handoff = agent_view["handoff_package"]
     assert handoff["original_messages"] == ["使用三天后一直泛红和刺痛"]
     assert handoff["confirmed_facts"]
+    assert handoff["handoff_reason"]
     assert handoff["risk_level"] == "high"
     assert handoff["rule_version"] == "risk-rules-v1"
 
@@ -76,6 +192,7 @@ def test_unknown_knowledge_fails_explicitly_to_handoff(tmp_path) -> None:
     assert response.status_code == 201
     assert response.json()["state"] == "HANDOFF"
     assert "没有足够的已审核依据" in response.json()["message"]
+    assert response.json()["event_status"] == "waiting_for_agent"
 
 
 def test_feedback_service_action_and_insights_are_auditable(tmp_path) -> None:
@@ -152,7 +269,7 @@ def test_database_failure_returns_safe_actionable_error(tmp_path) -> None:
     assert "secret-host" not in response.text
 
 
-def test_old_risk_message_does_not_block_a_new_unrelated_turn(tmp_path) -> None:
+def test_blocked_conversation_forwards_new_message_without_removing_safety_block(tmp_path) -> None:
     client = make_client(tmp_path)
     first = client.post("/v1/conversations", json={"message": "使用后刺痛"}).json()
 
@@ -161,10 +278,11 @@ def test_old_risk_message_does_not_block_a_new_unrelated_turn(tmp_path) -> None:
         json={"message": "我现在想问订单退款"},
     ).json()
 
-    assert second["state"] == "HANDOFF"
-    card = client.get(f"/v1/agent/conversations/{first['conversation_id']}").json()["empathy_card"]
-    assert card["intent"] == "after_sales"
-    assert card["risk_level"] == "low"
+    assert second["state"] == "BLOCK"
+    view = client.get(f"/v1/agent/conversations/{first['conversation_id']}").json()
+    assert view["empathy_card"]["intent"] == "complaint"
+    assert view["empathy_card"]["risk_level"] == "high"
+    assert view["handoff_package"]["transcript"][-1]["content"] == "我现在想问订单退款"
 
 
 def test_negated_hypothetical_and_third_party_symptoms_do_not_false_block(tmp_path) -> None:

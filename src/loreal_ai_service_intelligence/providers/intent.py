@@ -1,14 +1,12 @@
 from __future__ import annotations
 
-from typing import Optional, Protocol
+import logging
+from typing import Optional
 
-from loreal_ai_service_intelligence.models import Intent, IntentResult
+from loreal_ai_service_intelligence.domain.models import Intent, IntentResult
+from loreal_ai_service_intelligence.providers.interfaces import IntentProvider
 
-
-class IntentProvider(Protocol):
-    """Replaceable intent-classification boundary for an LLM or other provider."""
-
-    def classify(self, text: str) -> IntentResult: ...
+logger = logging.getLogger(__name__)
 
 
 class RuleBasedIntentProvider:
@@ -46,7 +44,15 @@ class FallbackIntentProvider:
                 validated = IntentResult.model_validate(result)
                 if validated.confidence >= self.minimum_confidence:
                     return validated
-            except Exception:
+                logger.warning(
+                    "intent_provider_fallback reason=low_confidence provider=%s",
+                    type(self.primary).__name__,
+                )
+            except Exception as error:
                 # Provider errors are intentionally contained at this trust boundary.
-                pass
+                logger.warning(
+                    "intent_provider_fallback reason=provider_error provider=%s error_type=%s",
+                    type(self.primary).__name__,
+                    type(error).__name__,
+                )
         return self.fallback.classify(text)

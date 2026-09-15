@@ -11,7 +11,7 @@ if [[ ! -f "${EXPERIMENT}" ]]; then
   exit 1
 fi
 
-export APP_CONFIG_FILE="${APP_CONFIG_FILE:-${PROJECT_ROOT}/config/development.env}"
+export APP_CONFIG_FILE="${APP_CONFIG_FILE:-${PROJECT_ROOT}/.env}"
 export SANDBOX_OUTPUT_DIR="${PROJECT_ROOT}/sandbox/output"
 mkdir -p "${SANDBOX_OUTPUT_DIR}"
 

@@ -5,6 +5,27 @@
 `InMemoryKnowledgeBase` 提供可替换的审核知识检索；`MongoRepository` 保存会话、审计、服务事件、
 人工动作和反馈。
 
+## Source package 分层
+
+代码目录参考成熟 Python harness 的职责分包方式，但只保留本服务当前真实需要的层，避免提前引入
+agent、MCP 或 sandbox 等未使用抽象：
+
+```text
+loreal_ai_service_intelligence/
+├── api/              # HTTP/ASGI 边界；application 与 Mock router
+├── domain/           # 跨层共享的业务 Schema 和 enum
+├── services/         # ConversationOrchestrator 与状态机
+├── providers/        # IntentProvider、KnowledgeProvider 及 fallback
+├── infrastructure/   # StorageRepository 的 MongoDB/Memory adapter
+├── config.py         # environment-backed settings
+├── cli.py            # process entrypoint
+└── main.py            # 兼容既有 ASGI import 的薄入口
+```
+
+依赖方向固定为 `api -> services -> domain`；`providers` 与 `infrastructure` 实现由 application
+注入 services。准备接入真实 LLM 时，应在 `providers/` 新增 vendor adapter，不应把 SDK 调用写进
+route、domain model 或 orchestrator。
+
 ## 当前请求链路
 
 ```text
@@ -16,10 +37,11 @@ FastAPI typed validation
     ▼
 ConversationOrchestrator
     ├── 附件能力检查 ───────────────► HANDOFF（未接文件 provider）
-    ├── 当前消息安全规则 ───────────► BLOCK
-    ├── 必要信息检查 ───────────────► ASK
-    ├── IntentProvider + fallback
-    └── KnowledgeProvider + answerability
+    ├── SafetyFirstDecisionPolicy ──► BLOCK
+    └── DecisionPolicy
+        ├── 必要信息检查 ───────────► ASK
+        ├── IntentProvider + fallback
+        └── KnowledgeProvider + answerability
             ├── 搓泥且有审核依据 ───► GUIDE
             ├── 其他有审核依据 ─────► RESOLVE（兼容状态）
             └── 无可靠依据 ─────────► HANDOFF
@@ -34,8 +56,9 @@ StorageRepository
 `TicketRecord`。Case 更正不会覆盖原始事实；Attempt 将建议、执行状态、观察和结果拆开；Ticket 将
 人工回复、动作完成、用户确认解决和重开拆成带版本事件，从而避免把客服动作完成误报成用户问题已解决。
 
-route 只负责 HTTP contract，状态判断、文案选择和审计数据生成位于 orchestrator；provider output
-必须经过 Pydantic model 校验，不能直接控制持久化或执行客服动作。
+route 只负责 HTTP contract；状态判断由可注入 `DecisionPolicy` 完成，文案选择、持久化和审计由
+orchestrator 调度。候选策略调用前固定执行安全门；provider output 必须经过 Pydantic model 校验，
+不能直接控制持久化或执行客服动作。
 
 当前实现使用 rule-based 理解和小型内置演示知识库，保证三条验收案例离线、可复现。它不是生产
 模型效果声明，也不是真实商品知识。后续接入千问或其他 provider 时，应把结构化理解封装在独立
@@ -50,6 +73,13 @@ interface 后，强制使用 `EmpathyCard` 校验 model output，并为 timeout�
 达到 `INTENT_MINIMUM_CONFIDENCE` 时才会被采用；timeout、异常、非法结果和低置信度统一降级到
 `RuleBasedIntentProvider`。高风险症状和必要追问在 provider 调用前执行，确保外部模型故障时安全
 规则仍有效。意图来源和置信度仅进入 Empathy Card 与客服审计视图，不暴露给消费者。
+
+`OpenAICompatibleIntentProvider` 是真实模型的 runtime adapter，配置后由 application factory
+同时作为 `IntentProvider` 和 `ResponseProvider` 注入。前者帮助理解用户意图，后者只在确定性状态
+与审核 evidence 的边界内，根据最近对话生成自然话术。安全 `BLOCK` 和人工 `HANDOFF` 不经过生成
+模型；异常、非法或空白输出回退 `_consumer_copy` 模板并记录 audit。
+自动注入。它设置明确 timeout 和有限 network retry，并验证 JSON 为冻结的 `IntentResult`；默认
+关闭，未配置 credential 时不会假装为 online model。
 
 每轮安全与意图判断以当前消息为主，历史仅用于补充已确认的选购上下文，避免旧症状永久污染后续
 问题。rule-based 安全 fallback 可识别常见否定、假设、第三方主体和已恢复表达；它只能降低明显

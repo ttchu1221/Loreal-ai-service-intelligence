@@ -9,7 +9,7 @@ from pymongo import ASCENDING, DESCENDING, MongoClient
 from pymongo.collection import Collection
 from pymongo.database import Database
 
-from loreal_ai_service_intelligence.models import StoredConversation
+from loreal_ai_service_intelligence.domain.models import StoredConversation
 
 
 def utc_now() -> datetime:
@@ -34,6 +34,8 @@ class StorageRepository(Protocol):
     def get_event_for_conversation(self, conversation_id: str) -> dict[str, Any] | None: ...
 
     def list_events(self) -> list[dict[str, Any]]: ...
+
+    def update_event_status(self, event_id: str, status: str) -> None: ...
 
     def record_feedback(
         self,
@@ -190,6 +192,12 @@ class MongoRepository:
             )
         )
 
+    def update_event_status(self, event_id: str, status: str) -> None:
+        self._ensure_indexes()
+        self.service_events.update_one(
+            {"event_id": event_id}, {"$set": {"status": status, "updated_at": utc_now()}}
+        )
+
     def record_feedback(
         self,
         conversation_id: str,
@@ -306,6 +314,10 @@ class MemoryRepository:
         return deepcopy(
             sorted(self.events.values(), key=lambda item: (-item["priority"], item["created_at"]))
         )
+
+    def update_event_status(self, event_id: str, status: str) -> None:
+        self.events[event_id]["status"] = status
+        self.events[event_id]["updated_at"] = utc_now()
 
     def record_feedback(
         self,

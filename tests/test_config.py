@@ -4,7 +4,7 @@ from loreal_ai_service_intelligence.config import get_settings
 
 
 def test_loads_selected_environment_file(monkeypatch) -> None:
-    config_file = Path(__file__).parents[1] / "config" / "test.env"
+    config_file = Path(__file__).parents[1] / "config" / "test.example"
     monkeypatch.setenv("APP_CONFIG_FILE", str(config_file))
     get_settings.cache_clear()
 

@@ -12,14 +12,15 @@ scripts/mongo-dev.sh
 ```
 
 脚本只监听 `127.0.0.1:27017`，数据写入被 Git 忽略的 `data/mongodb/`。随后在另一个 terminal
-运行 `scripts/dev.sh`。如需使用 Atlas 或其他 deployment，在本地 `.env` 或 runtime environment
-设置 `MONGODB_URI`，不要把包含用户名或密码的 URI 写入 repository。
+运行 `scripts/dev.sh`。本地 `.env` 只用于 LLM 配置，MongoDB 默认连接本机。如需使用 Atlas 或其他
+deployment，通过 runtime environment 或单独的完整 runtime config 设置 `MONGODB_URI`，不要把包含
+用户名或密码的 URI 写入 repository。
 
 ## Collection
 
 | Collection | 内容 | 主要 index |
 | --- | --- | --- |
-| `conversations` | 当前会话、消息、共情卡和状态 | unique `conversation_id` |
+| `conversations` | 当前会话、消息、Case revision、Attempt、Ticket、共情卡和状态 | unique `conversation_id` |
 | `audit_events` | 状态切换、转人工、feedback 和客服动作轨迹 | `conversation_id + created_at` |
 | `service_events` | 人工接管事件、优先级和进度 | unique `event_id`；unique `conversation_id + idempotency_key`；`priority + created_at` |
 | `feedback` | 与 `conversation_id`、`result_id` 绑定的解决反馈 | `conversation_id` |

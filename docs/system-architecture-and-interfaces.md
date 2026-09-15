@@ -10,8 +10,10 @@
 消费者工作区 ─┐
                ├─ FastAPI typed routes ─ ConversationOrchestrator ─ StorageRepository ─ MongoDB
 客服工作台 ───┘                              │                    └ MemoryRepository
-                                              ├ IntentProvider
-                                              └ KnowledgeProvider
+                                              └ SafetyFirstDecisionPolicy
+                                                  └ DecisionPolicy
+                                                      ├ IntentProvider
+                                                      └ KnowledgeProvider
 
 前端和 AI 联调 ─ POST /v1/mock/decisions ─ MockDecisionService
                                             └ 无 network、database 或 Ticket 副作用
@@ -20,6 +22,13 @@
 route 只执行 Schema validation、HTTP error mapping 和 service 调用。业务优先级、状态选择、Case、
 Attempt 和 Ticket 行为由 service 层处理。provider 返回值必须先通过 Pydantic 校验；AI 输出不能直接
 写数据库、建立 Ticket 或执行客服动作。
+
+实现目录按 `api/domain/services/providers/infrastructure` 分层。真实 LLM 和 RAG adapter 统一放入
+`providers/`，通过 `api/application.py` 的 application factory 注入，不得反向依赖 HTTP route。
+
+`IntentProvider`、`KnowledgeProvider` 和 `DecisionPolicy` 的 canonical contract 位于
+`providers/interfaces.py`。真实 LLM adapter 位于 `providers/openai_compatible.py`，由 factory
+根据 environment 配置注入；当前 adapter 仅完成 intent，不代表完整 AI 行为或 RAG 已联调。
 
 ## 数据库对象
 
@@ -131,7 +140,7 @@ curl -sS http://127.0.0.1:8000/v1/mock/decisions \
 Python 直接调用：
 
 ```python
-from loreal_ai_service_intelligence.mock_api import MockDecisionRequest, MockDecisionService
+from loreal_ai_service_intelligence.api.mock import MockDecisionRequest, MockDecisionService
 
 service = MockDecisionService("risk-rules-v1", "demo-knowledge-v1")
 result = service.decide(MockDecisionRequest(request_id="demo-001", current_message="底妆搓泥"))

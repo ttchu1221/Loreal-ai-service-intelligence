@@ -5,7 +5,7 @@ from typing import Literal, Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
-from loreal_ai_service_intelligence.models import ConversationState, RiskLevel
+from loreal_ai_service_intelligence.domain.models import ConversationState, RiskLevel
 
 
 class MockAttemptInput(BaseModel):

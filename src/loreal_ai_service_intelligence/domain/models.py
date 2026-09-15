@@ -36,6 +36,32 @@ class IntentResult(BaseModel):
     source: str = Field(min_length=1, max_length=100)
 
 
+class ProductContext(BaseModel):
+    product_name: Optional[str] = Field(default=None, max_length=200)
+    region: Optional[str] = Field(default=None, max_length=50)
+    usage_step: Optional[str] = Field(default=None, max_length=200)
+    related_products: list[str] = Field(default_factory=list)
+
+
+class Hypothesis(BaseModel):
+    hypothesis_id: str = Field(min_length=1, max_length=100)
+    statement: str = Field(min_length=1, max_length=500)
+    confidence: float = Field(ge=0, le=1)
+    status: Literal["unconfirmed", "supported", "rejected", "unknown"] = "unconfirmed"
+    evidence_ids: list[str] = Field(default_factory=list)
+
+
+class KnowledgeItem(BaseModel):
+    knowledge_id: str
+    version: str
+    content: str
+    source: str
+    scope: str = "demo"
+    region: Optional[str] = None
+    review_status: Literal["approved", "rejected", "pending"] = "approved"
+    keywords: tuple[str, ...] = ()
+
+
 class KnowledgeReference(BaseModel):
     knowledge_id: str
     version: str
@@ -56,9 +82,12 @@ class EmpathyCard(BaseModel):
     intent_source: str = "legacy"
     emotion: Optional[str] = None
     scenario: str
+    case_revision: int = Field(default=1, ge=1)
+    product_context: ProductContext = Field(default_factory=ProductContext)
     entities: dict[str, Any] = Field(default_factory=dict)
     confirmed_facts: list[str] = Field(default_factory=list)
     inferences: list[Inference] = Field(default_factory=list)
+    hypotheses: list[Hypothesis] = Field(default_factory=list)
     missing_information: list[str] = Field(default_factory=list)
     risk_level: RiskLevel
     risk_reasons: list[str] = Field(default_factory=list)
@@ -96,6 +125,19 @@ class ConsumerResponse(BaseModel):
     event_id: Optional[str] = None
     event_status: Optional[str] = None
     estimated_response_at: Optional[datetime] = None
+
+
+class ConversationTranscriptItem(BaseModel):
+    role: Literal["user", "assistant", "agent"]
+    content: str = Field(min_length=1, max_length=8000)
+    created_at: datetime
+
+
+class ConsumerConversationView(BaseModel):
+    conversation_id: str
+    state: ConversationState
+    last_result_id: str
+    transcript: list[ConversationTranscriptItem] = Field(default_factory=list)
 
 
 class HandoffDecision(BaseModel):
@@ -170,6 +212,11 @@ class TicketResultRequest(BaseModel):
     note: Optional[str] = Field(default=None, max_length=1000)
 
 
+class ConsumerTicketResultRequest(BaseModel):
+    event: Literal["user_confirmed_resolved", "reopened"]
+    note: Optional[str] = Field(default=None, max_length=1000)
+
+
 class TicketRecord(BaseModel):
     ticket_id: str
     conversation_id: str
@@ -178,6 +225,26 @@ class TicketRecord(BaseModel):
     ]
     version: int = 1
     result_events: list[dict[str, Any]] = Field(default_factory=list)
+    created_at: datetime
+    updated_at: datetime
+
+
+class ConsumerTicketView(BaseModel):
+    conversation_id: str
+    status: Literal[
+        "waiting_for_agent", "agent_replied", "action_completed", "resolved", "reopened"
+    ]
+    latest_agent_reply: Optional[str] = None
+    updated_at: datetime
+
+
+class ImprovementRecord(BaseModel):
+    improvement_id: str
+    problem_id: str
+    affected_versions: list[str]
+    status: Literal["identified", "fixed", "verified", "closed"]
+    fix_summary: Optional[str] = None
+    regression_case_ids: list[str] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
 
@@ -195,7 +262,11 @@ class EventSummary(BaseModel):
 class HandoffPackage(BaseModel):
     conversation_id: str
     original_messages: list[str]
+    transcript: list[ConversationTranscriptItem] = Field(default_factory=list)
     summary: str
+    handoff_reason: str
+    case: Optional[CaseRecord] = None
+    attempts: list[AttemptRecord] = Field(default_factory=list)
     confirmed_facts: list[str]
     inferences: list[Inference]
     missing_information: list[str]
@@ -240,11 +311,13 @@ class StoredConversation(BaseModel):
     conversation_id: str
     state: ConversationState
     messages: list[str]
+    transcript: list[ConversationTranscriptItem] = Field(default_factory=list)
     empathy_card: EmpathyCard
     last_result_id: str
     unresolved_attempts: int = 0
     case: Optional[CaseRecord] = None
     attempts: list[AttemptRecord] = Field(default_factory=list)
     ticket: Optional[TicketRecord] = None
+    improvements: list[ImprovementRecord] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime

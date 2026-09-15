@@ -2,14 +2,14 @@ from datetime import timedelta
 
 import mongomock
 
-from loreal_ai_service_intelligence.models import (
+from loreal_ai_service_intelligence.domain.models import (
     ConversationState,
     EmpathyCard,
     Intent,
     RiskLevel,
     StoredConversation,
 )
-from loreal_ai_service_intelligence.repository import MongoRepository, utc_now
+from loreal_ai_service_intelligence.infrastructure.repository import MongoRepository, utc_now
 
 
 def make_repository() -> MongoRepository:
