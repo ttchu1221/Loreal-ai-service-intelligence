@@ -1,4 +1,4 @@
-"""Backward-compatible ASGI entrypoint；实现位于 api package。"""
+"""HTTP application、route 与 transport contract。"""
 
 from loreal_ai_service_intelligence.api.application import app, create_app
 

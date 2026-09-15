@@ -1,10 +1,10 @@
 # This repository was initialized in a shared Python workspace. Ignore everything
 # by default and explicitly include only this project's files.
 /*
-!/.env.example
 !/.gitignore
 !/AGENTS.md
 !/CHANGELOG.md
+!/Dockerfile
 !/README.md
 !/pyproject.toml
 !/config/
@@ -32,7 +32,10 @@
 **/__pycache__/
 **/*.py[cod]
 **/.DS_Store
-/.env
+# 所有 runtime env 文件均禁止进入 Git；可提交模板统一使用 *.example。
+**/*.env
+**/.env
+**/.env.*
 /.venv/
 /.pytest_cache/
 /.ruff_cache/
@@ -49,5 +52,6 @@
 !/data/interim/.gitkeep
 /data/processed/**
 !/data/processed/.gitkeep
+/data/mongodb/**
 /sandbox/output/**
 !/sandbox/output/.gitkeep
