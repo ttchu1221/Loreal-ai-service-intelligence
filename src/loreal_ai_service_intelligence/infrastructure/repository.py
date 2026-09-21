@@ -9,6 +9,7 @@ from pymongo import ASCENDING, DESCENDING, MongoClient
 from pymongo.collection import Collection
 from pymongo.database import Database
 
+from loreal_ai_service_intelligence.domain.competition import P0SessionRecord
 from loreal_ai_service_intelligence.domain.models import StoredConversation
 
 
@@ -53,6 +54,12 @@ class StorageRepository(Protocol):
 
     def get_service_actions(self, event_id: str) -> list[dict[str, Any]]: ...
 
+    def save_p0_session(self, session: P0SessionRecord) -> None: ...
+
+    def get_p0_session(self, conversation_id: str) -> P0SessionRecord | None: ...
+
+    def list_p0_sessions(self) -> list[P0SessionRecord]: ...
+
 
 class MongoRepository:
     """MongoDB persistence adapter. The client connects lazily on first operation."""
@@ -77,6 +84,7 @@ class MongoRepository:
         self.service_events: Collection[dict[str, Any]] = self.database["service_events"]
         self.feedback: Collection[dict[str, Any]] = self.database["feedback"]
         self.service_actions: Collection[dict[str, Any]] = self.database["service_actions"]
+        self.p0_sessions: Collection[dict[str, Any]] = self.database["p0_sessions"]
         self._indexes_ready = False
         self._index_lock = Lock()
 
@@ -101,6 +109,10 @@ class MongoRepository:
             self.service_events.create_index([("priority", DESCENDING), ("created_at", ASCENDING)])
             self.feedback.create_index("conversation_id")
             self.service_actions.create_index([("event_id", ASCENDING), ("created_at", ASCENDING)])
+            self.p0_sessions.create_index("conversation_id", unique=True)
+            self.p0_sessions.create_index(
+                [("decision.risk_level", DESCENDING), ("created_at", ASCENDING)]
+            )
             self._indexes_ready = True
 
     @staticmethod
@@ -245,6 +257,28 @@ class MongoRepository:
             )
         )
 
+    def save_p0_session(self, session: P0SessionRecord) -> None:
+        self._ensure_indexes()
+        self.p0_sessions.replace_one(
+            {"conversation_id": session.conversation_id},
+            session.model_dump(mode="json"),
+            upsert=True,
+        )
+
+    def get_p0_session(self, conversation_id: str) -> P0SessionRecord | None:
+        self._ensure_indexes()
+        document = self._clean(self.p0_sessions.find_one({"conversation_id": conversation_id}))
+        return P0SessionRecord.model_validate(document) if document else None
+
+    def list_p0_sessions(self) -> list[P0SessionRecord]:
+        self._ensure_indexes()
+        return [
+            P0SessionRecord.model_validate(self._clean(document))
+            for document in self.p0_sessions.find().sort(
+                [("decision.risk_level", DESCENDING), ("created_at", ASCENDING)]
+            )
+        ]
+
 
 class MemoryRepository:
     """Deterministic test adapter without an external database."""
@@ -255,6 +289,7 @@ class MemoryRepository:
         self.events: dict[str, dict[str, Any]] = {}
         self.feedback: list[dict[str, Any]] = []
         self.actions: list[dict[str, Any]] = []
+        self.p0_sessions: dict[str, P0SessionRecord] = {}
 
     def save_conversation(self, conversation: StoredConversation) -> None:
         self.conversations[conversation.conversation_id] = conversation.model_copy(deep=True)
@@ -355,3 +390,20 @@ class MemoryRepository:
 
     def get_service_actions(self, event_id: str) -> list[dict[str, Any]]:
         return deepcopy([item for item in self.actions if item["event_id"] == event_id])
+
+    def save_p0_session(self, session: P0SessionRecord) -> None:
+        self.p0_sessions[session.conversation_id] = session.model_copy(deep=True)
+
+    def get_p0_session(self, conversation_id: str) -> P0SessionRecord | None:
+        session = self.p0_sessions.get(conversation_id)
+        return session.model_copy(deep=True) if session else None
+
+    def list_p0_sessions(self) -> list[P0SessionRecord]:
+        priority = {"high": 0, "medium": 1, "low": 2}
+        return [
+            item.model_copy(deep=True)
+            for item in sorted(
+                self.p0_sessions.values(),
+                key=lambda item: (priority[item.decision.risk_level], item.created_at),
+            )
+        ]

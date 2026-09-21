@@ -155,3 +155,26 @@ def test_rejects_blank_generated_response() -> None:
 
     with pytest.raises(ValueError, match="message is invalid"):
         provider.generate(ConversationRequest(message="怎么用"), card, None)
+
+
+def test_rejects_ask_response_with_multiple_questions() -> None:
+    provider = OpenAICompatibleIntentProvider(
+        api_key="test-secret",
+        base_url="https://llm.example/v1",
+        model="demo-model",
+        timeout_seconds=1,
+        retry_limit=0,
+        transport=lambda _request, _timeout: _response({"message": "你的肤色偏黄吗？还是偏粉？"}),
+    )
+    card = EmpathyCard(
+        conversation_id="conv_1",
+        surface_issue="选择粉底色号",
+        intent=Intent.PURCHASE,
+        scenario="purchase_consultation",
+        risk_level=RiskLevel.LOW,
+        next_state=ConversationState.ASK,
+        schema_version="1.0",
+    )
+
+    with pytest.raises(ValueError, match="at most one question"):
+        provider.generate(ConversationRequest(message="怎么选色号"), card, None)

@@ -128,7 +128,13 @@ class OpenAICompatibleIntentProvider:
         message = result.get("message")
         if not isinstance(message, str) or not message.strip() or len(message) > 1200:
             raise ValueError("LLM response message is invalid")
-        return message.strip()
+        message = message.strip()
+        if (
+            card.next_state == ConversationState.ASK
+            and sum(message.count(mark) for mark in ("?", "？")) > 1
+        ):
+            raise ValueError("LLM ASK response must contain at most one question")
+        return message
 
     def _completion(self, payload: dict[str, Any]) -> dict[str, Any]:
         request = Request(

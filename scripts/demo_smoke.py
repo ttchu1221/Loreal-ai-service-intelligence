@@ -56,6 +56,89 @@ def run_demo_smoke() -> list[tuple[str, int, str]]:
             },
         },
     )
+    p0_base = {
+        "snapshot_id": "snapshot-p0-auto",
+        "case_id": "case-p0-auto",
+        "conversation_id": "conversation-p0-auto",
+        "issue_id": "issue-p0-auto",
+        "customer_id": "customer-p0",
+        "current_message_id": "message-p0-auto",
+        "cutoff_message_seq": 1,
+        "current_message": "这款产品的规格是什么？",
+        "chat_history": [
+            {
+                "message_id": "message-p0-auto",
+                "message_seq": 1,
+                "role": "consumer",
+                "content": "这款产品的规格是什么？",
+                "created_at": "2026-09-21T08:00:00Z",
+            }
+        ],
+        "scene_major": "普通咨询",
+        "scene_minor": "W01",
+        "scene_source": "smoke",
+        "products": [
+            {
+                "product_id": "product-p0",
+                "sku": "SKU-P0",
+                "name": "演示面霜",
+                "source_id": "demo-catalog",
+                "observed_at": "2026-09-21T08:00:00Z",
+                "valid_until": "2026-10-21T08:00:00Z",
+            }
+        ],
+        "knowledge_evidence": [
+            {
+                "evidence_id": "KB-P0-SMOKE",
+                "source": "demo-knowledge",
+                "excerpt": "演示面霜规格为 50ml。",
+                "product_id": "product-p0",
+                "scope": "product-specification",
+                "version": "v1",
+                "observed_at": "2026-09-21T08:00:00Z",
+                "valid_until": "2026-10-21T08:00:00Z",
+                "valid": True,
+            }
+        ],
+        "context_version": "smoke-v1",
+        "captured_at": "2026-09-21T08:00:00Z",
+    }
+    p0_auto = call(
+        "比赛版自动回复",
+        "POST",
+        "/v1/competition/sessions/analyze",
+        201,
+        json=p0_base,
+    )
+    p0_risk_payload = {
+        **p0_base,
+        "snapshot_id": "snapshot-p0-risk",
+        "case_id": "case-p0-risk",
+        "conversation_id": "conversation-p0-risk",
+        "issue_id": "issue-p0-risk",
+        "current_message_id": "message-p0-risk",
+        "current_message": "使用后持续泛红和刺痛",
+        "scene_major": "风险服务",
+        "scene_minor": "adverse_reaction",
+        "products": [],
+        "knowledge_evidence": [],
+    }
+    p0_risk_payload["chat_history"] = [
+        {
+            "message_id": "message-p0-risk",
+            "message_seq": 1,
+            "role": "consumer",
+            "content": "使用后持续泛红和刺痛",
+            "created_at": "2026-09-21T08:00:00Z",
+        }
+    ]
+    p0_risk = call(
+        "比赛版风险接管",
+        "POST",
+        "/v1/competition/sessions/analyze",
+        201,
+        json=p0_risk_payload,
+    )
     intake = call(
         "客服进线聚合",
         "POST",
@@ -184,6 +267,9 @@ def run_demo_smoke() -> list[tuple[str, int, str]]:
     assert mock["state"] == "ASK"
     assert agent_mock["provider"] == "deterministic_agent_mock"
     assert agent_mock["empathy_understanding"]["historical_promises"]
+    assert p0_auto["decision"]["service_mode"] == "AUTO_REPLY"
+    assert p0_risk["decision"]["service_mode"] == "HUMAN_REQUIRED"
+    assert p0_risk["takeover"]["takeover_locked"] is True
     assert intake["conversation"]["assistant_brief"]["escalation_target"] == "logistics"
     assert conversation["state"] == "ASK" and guide["state"] == "GUIDE"
     assert case["current_revision"] == 2 and updated_attempt["outcome"] == "improved"
