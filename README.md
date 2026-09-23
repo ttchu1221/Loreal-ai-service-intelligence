@@ -31,6 +31,7 @@ scripts/dev.sh        # terminal 2
 
 - 消费者端：<http://127.0.0.1:8000/workspace/consumer>
 - 人工客服端：<http://127.0.0.1:8000/workspace/agent>
+- 比赛版 P0 工作台：<http://127.0.0.1:8000/workspace/competition>
 - 健康检查：<http://127.0.0.1:8000/health>
 - API 文档：<http://127.0.0.1:8000/docs>
 
@@ -73,6 +74,11 @@ timeout 和 retry 直接使用代码默认值。保存后重新运行 `scripts/d
 
 ## 已实现能力
 
+- 比赛版独立 P0 技术合同：实现 `AUTO_REPLY`、`AGENT_ASSIST`、`HUMAN_REQUIRED` 三模式，
+  将消息回执、人工处理、业务动作、问题结果和本地风险拆成独立状态；支持 cutoff 防未来信息泄漏、
+  数据归属检查、发送幂等、接管锁、模拟售后和明确解决条件。
+- 聊天、商品、订单、工单和知识通过 `ContextDataProvider` 接口接入；正式数据未提供时按会话读取
+  返回明确 `503`，同时保留完整 snapshot API、Memory Mock adapter 和三条主演示场景。
 - agent-first 进线 API：通过上游 `source_conversation_id` 聚合当前聊天、订单和历史工单，自动形成
   客服待处理事件，并输出服务轨迹、意图、情绪、紧急度、已知/未知信息、历史承诺、未完成事项、
   字段级来源依据、回复草稿、下一步动作和专业团队升级方向。
@@ -94,7 +100,8 @@ timeout 和 retry 直接使用代码默认值。保存后重新运行 `scripts/d
 完整 API contract 与演示边界见
 [比赛 MVP API](docs/api.md)，实现结构见
 [比赛 MVP Backend Architecture](docs/architecture.md)，4 号 P0 技术合同见
-[系统架构与技术接口](docs/system-architecture-and-interfaces.md)。
+[系统架构与技术接口](docs/system-architecture-and-interfaces.md)，新 PRD V1.1 对应实现见
+[比赛版 P0 技术合同](docs/competition-p0-contract.md)。
 
 ## 质量检查
 

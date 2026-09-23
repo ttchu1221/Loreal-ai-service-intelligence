@@ -19,6 +19,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- LLM 生成 `ASK` 话术时新增单问题硬校验；违反约束会回退确定性模板，避免一个追问中出现多个问题。
+- 自动化测试隔离本地 `.env`，不再因开发者启用真实 LLM 而产生外部调用和非确定性结果。
+
 - 修复启用 LLM 后“暂不转人工”的用户选择确认语可能被模型改写的问题；该状态现保持确定性话术。
 - 修复 LLM 仅参与 intent 分类、配置真实模型后消费者话术仍然单一的问题；生成异常或非法输出会自动回退且不影响主流程。
 - 修复消费者转人工后客服工作台只刷新队列但不打开工单，以及部分浏览器因隐式 DOM 全局变量导致页面无反应的问题；新工单现会自动展示，并显示同步状态或错误。
@@ -31,6 +34,12 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- 新增 PRD V1.1 比赛版 `/v1/competition` API 和三栏工作台，完整实现 `AUTO_REPLY`、
+  `AGENT_ASSIST`、`HUMAN_REQUIRED` 三模式，以及消息发送、人工处理、业务动作、问题结果和本地风险
+  五类独立状态。
+- 新增 `ContextDataProvider` 数据接口和未配置/Memory adapter；正式数据缺失时显式返回 `503`，支持
+  cutoff、防跨用户关联、来源时间与有效性、发送幂等、人工接管锁和 Mock/SIMULATED 外部动作边界。
+- 新增比赛版 P0 技术合同、TC01 至 TC30 工程验收映射和自动化回归测试。
 - 新增 `/v1/mock/agent-assists` 人工客服插件 Mock contract，完整返回服务轨迹、共情理解、回复与动作
   建议、风险跟踪四个区域，并提供聊天、订单和历史工单的字段级来源依据。
 - 新增 AI 草稿采纳、编辑、拒绝反馈 API，以及风险 `open`、`monitoring`、`escalated`、`closed`

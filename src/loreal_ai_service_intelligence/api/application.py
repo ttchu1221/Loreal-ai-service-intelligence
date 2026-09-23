@@ -8,6 +8,8 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from pymongo.errors import PyMongoError
 
 from loreal_ai_service_intelligence import __version__
+from loreal_ai_service_intelligence.api.competition import create_competition_router
+from loreal_ai_service_intelligence.api.competition_workspace import competition_workspace_html
 from loreal_ai_service_intelligence.api.mock import MockDecisionService, create_mock_router
 from loreal_ai_service_intelligence.config import get_settings
 from loreal_ai_service_intelligence.domain.models import (
@@ -42,6 +44,10 @@ from loreal_ai_service_intelligence.infrastructure.repository import (
     MongoRepository,
     StorageRepository,
 )
+from loreal_ai_service_intelligence.providers.context import (
+    ContextDataProvider,
+    UnconfiguredContextDataProvider,
+)
 from loreal_ai_service_intelligence.providers.factory import (
     create_intent_provider,
     create_response_provider,
@@ -52,6 +58,7 @@ from loreal_ai_service_intelligence.providers.interfaces import (
     KnowledgeProvider,
     ResponseProvider,
 )
+from loreal_ai_service_intelligence.services.competition import CompetitionP0Service
 from loreal_ai_service_intelligence.services.orchestration import ConversationOrchestrator
 
 
@@ -61,6 +68,7 @@ def create_app(
     knowledge_provider: Optional[KnowledgeProvider] = None,
     decision_policy: Optional[DecisionPolicy] = None,
     response_provider: Optional[ResponseProvider] = None,
+    context_provider: Optional[ContextDataProvider] = None,
 ) -> FastAPI:
     settings = get_settings()
     intent_provider = intent_provider or create_intent_provider(settings)
@@ -83,6 +91,13 @@ def create_app(
         create_mock_router(
             MockDecisionService(settings.rule_version, settings.knowledge_version),
             enabled=settings.mock_api_enabled,
+        )
+    )
+    application.include_router(
+        create_competition_router(
+            CompetitionP0Service(repository, settings),
+            repository,
+            context_provider or UnconfiguredContextDataProvider(),
         )
     )
 
@@ -417,6 +432,10 @@ def create_app(
     @application.get("/workspace/agent", response_class=HTMLResponse, tags=["workspace"])
     def agent_workspace() -> HTMLResponse:
         return HTMLResponse(_agent_workspace_html(), headers={"Cache-Control": "no-store"})
+
+    @application.get("/workspace/competition", response_class=HTMLResponse, tags=["workspace"])
+    def competition_workspace() -> HTMLResponse:
+        return HTMLResponse(competition_workspace_html(), headers={"Cache-Control": "no-store"})
 
     @application.get("/v1/insights/overview", response_model=InsightsResponse, tags=["brand"])
     def get_insights(

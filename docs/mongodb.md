@@ -25,6 +25,7 @@ deployment，通过 runtime environment 或单独的完整 runtime config 设置
 | `service_events` | 人工接管事件、优先级和进度 | unique `event_id`；unique `conversation_id + idempotency_key`；`priority + created_at` |
 | `feedback` | 与 `conversation_id`、`result_id` 绑定的解决反馈 | `conversation_id` |
 | `service_actions` | 人工执行动作、参数和结果 | `event_id + created_at` |
+| `p0_sessions` | PRD V1.1 context snapshot、三模式决策、接管锁、发送回执、本地动作、风险、问题结果、人工反馈与审计 | unique `conversation_id`；`decision.risk_level + created_at` |
 
 应用在首次 persistence 操作时幂等创建 indexes。MongoDB 不可用时业务 endpoint 返回 `503` 和安全的
 通用错误，不暴露 URI、credential 或 server detail；`/health` 不依赖 MongoDB，仍用于进程级探活。

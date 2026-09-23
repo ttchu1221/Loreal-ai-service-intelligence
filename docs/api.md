@@ -3,6 +3,30 @@
 当前 backend 实现消费者咨询、人工接管和品牌洞察的同一条服务闭环。所有示例知识、事件处理人和
 经营数据均属于 `demo`，不得解释为真实欧莱雅业务数据或正式 SLA。
 
+## PRD V1.1 比赛版接口
+
+新 PRD 使用 `/v1/competition`，以 `AUTO_REPLY`、`AGENT_ASSIST`、`HUMAN_REQUIRED` 取代旧状态
+作为比赛版服务模式，同时独立保存消息发送、人工处理、业务动作、问题结果和本地风险状态。旧 API
+继续保留兼容，但新演示和后续数据/AI 联调应使用比赛版接口。
+
+- `POST /v1/competition/sessions/analyze`：提交带 cutoff、归属、来源、时间和有效性的完整 context
+  snapshot，返回并保存服务轨迹、共情理解、建议、evidence 和风险记录。
+- `POST /v1/competition/conversations/{id}/analyze`：通过 `ContextDataProvider` 加载正式数据；未配置
+  adapter 时返回 `503`，无 snapshot 返回 `404`。
+- `GET /v1/competition/sessions`、`GET /v1/competition/sessions/{id}`：恢复风险优先队列和完整状态。
+- `POST /v1/competition/sessions/{id}/messages`：分别处理 system/agent 发送，校验 decision、最新消息、
+  接管锁和 idempotency；比赛回执固定标记 `SIMULATED`。
+- `POST /v1/competition/sessions/{id}/takeover`：认领并锁定自动发送。
+- `POST /v1/competition/sessions/{id}/actions`：只记录 `PENDING_MANUAL` 或 `SIMULATED` 售后动作。
+- `PATCH /v1/competition/sessions/{id}/risk`：风险关闭必须有处理人、说明和 evidence。
+- `PATCH /v1/competition/sessions/{id}/issue-result`：明确确认且无开放动作/风险才能解决；支持未确认
+  归档和重开。
+- `POST /v1/competition/sessions/{id}/suggestion-feedback`：采用、修改发送或拒绝建议。
+- `POST /v1/competition/sessions/{id}/corrections`：保留 AI 原值、人工新值、操作者和原因。
+
+完整字段、错误和接入边界见[比赛版 P0 技术合同](competition-p0-contract.md)。可运行工作台位于
+`/workspace/competition`，页面内三个主演示场景均通过 HTTP 实时创建，且明确标记 Mock/SIMULATED。
+
 ## 消费者端
 
 - `GET /v1/conversations/{conversation_id}`：恢复消费者会话当前状态、最新 `result_id` 以及按时间排列的

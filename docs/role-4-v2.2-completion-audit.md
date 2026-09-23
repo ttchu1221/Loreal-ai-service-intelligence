@@ -1,5 +1,10 @@
 # 4号开发与集成职责代码完成度审计
 
+> 2026-09-21 更新：PRD V1.1 与 P0 产品规则 V1.0 已将比赛版主状态替换为
+> `AUTO_REPLY / AGENT_ASSIST / HUMAN_REQUIRED`。对应实现、数据 provider、发送门禁、接管锁、
+> 风险和问题结果接口已迁入独立 `/v1/competition` 模块；旧 V2.2 接口仅保留兼容。最新合同与测试
+> 证据分别见 `competition-p0-contract.md` 和 `p0-acceptance-evidence.md`。
+
 本文依据 Delivery Plan V2.2 核对 4 号在代码、接口、持久化、部署和文档方面的责任。附件只作为
 需求来源；其中明确说明 V2.2 本身没有重新复核代码，因此本文件以当前 repository 的实际实现和
 本次自动化测试为准。结论是：4 号负责的 P0 工程合同、人工客服插件 Mock、状态持久化与本地联调

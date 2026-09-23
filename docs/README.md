@@ -16,10 +16,13 @@
   production 接入路线。
 - [P0 系统架构与技术接口](system-architecture-and-interfaces.md)：4 号负责的数据库、状态机、API
   和可调用 AI Mock contract。
+- [比赛版 P0 技术合同](competition-p0-contract.md)：PRD V1.1 三模式、独立状态、数据 provider、发送
+  门禁、接管锁、风险与问题结果接口。
 
 ## 完成度与决策
 
 - [4号 V2.2 完成度审计](role-4-v2.2-completion-audit.md)：逐项代码证据、缺口、依赖和发布阻断项。
+- [比赛版 P0 验收执行记录](p0-acceptance-evidence.md)：TC01 至 TC30 的工程验证与测试定位。
 - [ADR 001 Provider和决策边界](adr/001-provider-and-decision-boundaries.md)：AI contract 与安全优先
   注入决策；当前状态为 Proposed，尚待 1、3 号共同冻结。
 
