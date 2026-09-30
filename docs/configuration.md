@@ -65,6 +65,11 @@ LLM_MODEL=replace-with-approved-model
 `INTENT_MINIMUM_CONFIDENCE` 时退回 rule-based intent。真实 model、Prompt 和 endpoint 需经 3 号
 确认后再写入部署环境，repository 不保存 API key。
 
+同一配置也会自动创建比赛版 `CompetitionModelProvider`。比赛版仍先由确定性规则计算
+`AUTO_REPLY / AGENT_ASSIST / HUMAN_REQUIRED`、风险和发送门禁，再由 LLM 生成消费者回复或客服草稿；
+`HUMAN_REQUIRED` 没有自动回复，因此不会调用模型。模型输出失败会记录 `MODEL_FAILED` 并恢复确定性
+草稿。离线 `scripts/run_eval.py` 默认关闭 LLM，确保回归结果可复现且不会意外产生外部调用。
+
 ## 安全边界
 
 `config/` 中只能放非敏感默认值。API key、credential 和 private endpoint 必须存放在不被 Git

@@ -44,11 +44,17 @@ from loreal_ai_service_intelligence.infrastructure.repository import (
     MongoRepository,
     StorageRepository,
 )
+from loreal_ai_service_intelligence.providers.competition import (
+    CompetitionModelProvider,
+    CompetitionOperationRecorder,
+    CompetitionRetrievalProvider,
+)
 from loreal_ai_service_intelligence.providers.context import (
     ContextDataProvider,
     UnconfiguredContextDataProvider,
 )
 from loreal_ai_service_intelligence.providers.factory import (
+    create_competition_model_provider,
     create_intent_provider,
     create_response_provider,
 )
@@ -69,10 +75,16 @@ def create_app(
     decision_policy: Optional[DecisionPolicy] = None,
     response_provider: Optional[ResponseProvider] = None,
     context_provider: Optional[ContextDataProvider] = None,
+    competition_model_provider: Optional[CompetitionModelProvider] = None,
+    competition_retrieval_provider: Optional[CompetitionRetrievalProvider] = None,
+    competition_operation_recorder: Optional[CompetitionOperationRecorder] = None,
 ) -> FastAPI:
     settings = get_settings()
     intent_provider = intent_provider or create_intent_provider(settings)
     response_provider = response_provider or create_response_provider(settings)
+    competition_model_provider = competition_model_provider or create_competition_model_provider(
+        settings
+    )
     repository = repository or MongoRepository(
         settings.mongodb_uri,
         settings.mongodb_database,
@@ -95,7 +107,13 @@ def create_app(
     )
     application.include_router(
         create_competition_router(
-            CompetitionP0Service(repository, settings),
+            CompetitionP0Service(
+                repository,
+                settings,
+                competition_model_provider,
+                competition_retrieval_provider,
+                competition_operation_recorder,
+            ),
             repository,
             context_provider or UnconfiguredContextDataProvider(),
         )
@@ -520,9 +538,7 @@ animation:rise .24s ease-out;flex:0 0 auto}
 box-shadow:0 7px 22px rgba(66,40,49,.06)}.bubble.user{align-self:flex-end;background:var(--ink);
 color:#fff;border-bottom-right-radius:5px}.bubble.agent{border-color:#d99aae;background:#fff4f7}.bubble.error{align-self:flex-start;background:#fff4f4;color:#8a2330;
 border:1px solid #efc7cc}.bubble small{display:block;margin-top:8px;opacity:.58;font-size:11px}
-.composer{flex:0 0 auto;padding:18px 24px 22px;border-top:1px solid var(--line);background:#fff}.product-row{display:flex;
-align-items:center;gap:8px;margin-bottom:10px}.product-row label{font-size:12px;color:var(--muted)}input{border:0;
-background:#f5efed;border-radius:20px;padding:7px 12px;color:var(--ink)}.input-wrap{display:flex;align-items:flex-end;
+.composer{flex:0 0 auto;padding:18px 24px 22px;border-top:1px solid var(--line);background:#fff}.input-wrap{display:flex;align-items:flex-end;
 gap:10px;background:#f6f1ef;border:1px solid transparent;border-radius:20px;padding:7px 8px 7px 16px}
 .input-wrap:focus-within{border-color:#cf9dad;background:#fff}textarea{flex:1;resize:none;border:0;background:transparent;
 padding:8px 0;min-height:44px;max-height:120px;outline:0}.send{width:46px;height:46px;border-radius:50%;
@@ -551,8 +567,7 @@ flex-direction:column;overflow:visible}.chat{height:100vh;min-height:560px;flex:
 <button id="clearButton" class="clear" onclick="clearConversation()" type="button">清空会话</button></div></header>
 <div id="messages" class="messages" aria-live="polite"><div class="bubble ai">你好，我是你的智慧美妆顾问。
 可以告诉我遇到的问题，我会逐步帮你排查。<small>AI 顾问 · 刚刚</small></div></div>
-<div id="result" hidden>等待开始</div><section class="composer"><div class="product-row"><label for="product">当前产品</label>
-<input id="product" value="演示粉底" aria-label="产品名称"></div><div class="input-wrap">
+<div id="result" hidden>等待开始</div><section class="composer"><div class="input-wrap">
 <textarea id="message" rows="2" aria-label="问题描述" placeholder="描述你的问题，或输入“转人工”……">我的底妆总是搓泥</textarea>
 <button id="sendButton" class="send" onclick="send()" aria-label="发送消息">↑</button></div>
 <div class="quick"><button id="handoffButton" class="chip" onclick="handoff()" disabled>联系人工客服</button>
@@ -568,7 +583,7 @@ flex-direction:column;overflow:visible}.chat{height:100vh;min-height:560px;flex:
 <p class="privacy">对话内容仅用于本次服务演示，不会自动用于模型训练。</p></aside></main>
 <script>
 const messagesList=document.getElementById('messages');const messageInput=document.getElementById('message');
-const productInput=document.getElementById('product');const sendButtonEl=document.getElementById('sendButton');
+const sendButtonEl=document.getElementById('sendButton');
 const sessionEl=document.getElementById('session');const handoffButtonEl=document.getElementById('handoffButton');
 const resolvedButtonEl=document.getElementById('resolvedButton');
 const unresolvedButtonEl=document.getElementById('unresolvedButton');const aiStepEl=document.getElementById('aiStep');
@@ -599,7 +614,7 @@ unresolvedButtonEl.disabled=!resultId;
 aiStepEl.classList.add('active');if(b.event_id)startPolling();}
 async function send(){if(sendButtonEl.disabled)return;const text=messageInput.value.trim();if(!text)return;
 messageInput.value='';setSending(true);addBubble(text,'user');try{
-const payload={message:text,product:productInput.value||null};
+const payload={message:text};
 const path=conversationId?`/v1/conversations/${conversationId}/messages`:'/v1/conversations';
 const b=await call(path,{method:'POST',headers:{'content-type':'application/json'},
 body:JSON.stringify(payload)});conversationId=b.conversation_id;

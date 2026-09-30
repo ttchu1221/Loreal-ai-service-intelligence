@@ -9,6 +9,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- 消费者工作台移除“当前产品”和默认“演示粉底”输入，不再把测试产品静默附加到每条消息；产品
+  上下文改由对话、订单或工单识别，缺失且影响回答时再由 AI 澄清。
 - 人工客服工作台将完整 transcript 改为与消费者端一致的聊天气泡布局，交接摘要折叠展示；客服可在
   处理完成后关闭会话，关闭项会移出待处理队列，消费者反馈“仍需处理”时自动重新入队。
 - 客服端状态改为中文可读文案，回复框支持 `Enter` 发送和 `Shift+Enter` 换行，并增加空内容校验、
@@ -19,6 +21,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- 修复比赛版只检查最后一条消息而漏掉前文不良反应、就医、孕产安全、监管投诉和退款未到账风险的
+  问题；风险判断现在保留 cutoff 内消费者原话，并补充保存方式与质地类产品意图识别。
 - LLM 生成 `ASK` 话术时新增单问题硬校验；违反约束会回退确定性模板，避免一个追问中出现多个问题。
 - 自动化测试隔离本地 `.env`，不再因开发者启用真实 LLM 而产生外部调用和非确定性结果。
 
@@ -34,6 +38,14 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- `LLM_ENABLED=true` 时自动为比赛版创建 OpenAI-compatible 话术 provider，在确定性安全决策后生成
+  消费者回复或客服草稿；模型失败保留可见降级且不能修改模式、风险和发送权限。
+- 新增正式 Eval JSON runner，以隔离的 deterministic baseline 逐条执行案例，输出服务模式准确率、
+  高风险 recall、自动回复 precision、输入完整率和逐案例人工复核材料；不会把标准答案传入业务服务。
+- 新增可重复执行的 Eval TSV 转 JSON 工具，结构化拆分 cutoff 前聊天、关联订单/工单编号和标准答案，
+  并校验必要表头、案例 ID、服务模式与消息 cutoff，避免把 expected answer 混入模型输入。
+- 比赛版新增模型、检索和运行记录三类可注入 provider 边界；失败时通过 session `degradations` 和
+  三栏工作台显示稳定错误码、操作说明与实际 fallback，并补充不泄露内部异常的回归测试。
 - 新增 PRD V1.1 比赛版 `/v1/competition` API 和三栏工作台，完整实现 `AUTO_REPLY`、
   `AGENT_ASSIST`、`HUMAN_REQUIRED` 三模式，以及消息发送、人工处理、业务动作、问题结果和本地风险
   五类独立状态。

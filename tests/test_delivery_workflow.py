@@ -361,6 +361,10 @@ def test_minimum_workspaces_are_available() -> None:
     assert "messageInput.value='';setSending(true)" in consumer
     assert "messageInput.value=text;showError(e)" in consumer
     assert 'id="clearButton"' in consumer
+    assert 'id="product"' not in consumer
+    assert "当前产品" not in consumer
+    assert "演示粉底" not in consumer
+    assert "const payload={message:text};" in consumer
     assert "function clearConversation()" in consumer
     assert "localStorage.removeItem('lorealConversationId')" in consumer
     assert "顾问。\\n可以告诉我" in consumer

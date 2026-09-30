@@ -15,7 +15,7 @@ Gold 标签到位后，可以在不修改 API 的情况下替换 fixture 重跑�
 | TC08 TC09 TC10 | 不适、就医、明确人工均强制人工并设置锁；风险不生成消费者回复 | `test_tc08_tc09_*` and `test_tc10_*` |
 | TC11 TC12 TC13 TC14 | 缺商品只补问一个主问题；无效证据/同时点冲突强制人工；多订单辅助 | `test_tc11_*`, `test_tc12_*`, `test_tc14_*` |
 | TC15 TC16 TC17 TC18 | 首次未解决辅助、第二次强制；投诉/安全异常强制；冲突不自动执行 | `test_tc14_*`, `test_tc16_tc17_*`, conflict tests |
-| TC19 | provider 未配置返回 503；source failure 输入强制人工 | `test_tc19_provider_missing_*` |
+| TC19 | provider 未配置返回 503；模型失败确定性回退、检索失败转人工、记录失败转本地审计且均前端可见 | `test_tc19_provider_missing_*`、`test_*_failure_is_visible_*` |
 | TC20 TC21 TC22 | UNKNOWN 锁发送；接管锁跨分析保留；发送 idempotency 防重复 | `test_tc20_*`, `test_tc21_*`, TC01 repeat send |
 | TC23 | 拒绝保留原草稿和原因；人工更正保留原值 | `test_tc23_feedback_and_correction_preserve_ai_original` |
 | TC24 | 售后动作只保存 PENDING_MANUAL 或 SIMULATED，绝不标记外部执行 | `test_tc24_external_actions_are_only_pending_manual_or_simulated` |

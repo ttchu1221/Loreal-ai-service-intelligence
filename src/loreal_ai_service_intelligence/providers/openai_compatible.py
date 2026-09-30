@@ -8,6 +8,7 @@ from typing import Any
 from urllib.error import URLError
 from urllib.request import Request, urlopen
 
+from loreal_ai_service_intelligence.domain.competition import P0ContextSnapshot, P0Decision
 from loreal_ai_service_intelligence.domain.models import (
     ConversationRequest,
     ConversationState,
@@ -167,3 +168,56 @@ class OpenAICompatibleIntentProvider:
     def _send(request: Request, timeout_seconds: float) -> bytes:
         with urlopen(request, timeout=timeout_seconds) as response:  # noqa: S310
             return response.read()
+
+
+class OpenAICompatibleCompetitionModelProvider(OpenAICompatibleIntentProvider):
+    """比赛版话术生成 adapter；固定决策由上游规则提供且不可被模型修改。"""
+
+    def generate_reply(self, snapshot: P0ContextSnapshot, decision: P0Decision) -> str:
+        context = {
+            "fixed_decision": {
+                "service_mode": decision.service_mode.value,
+                "intent": decision.intent,
+                "risk_type": decision.risk_type,
+                "send_allowed": decision.send_allowed,
+                "reply_audience": decision.reply_audience,
+                "next_action": decision.next_action,
+            },
+            "current_message": snapshot.current_message,
+            "known_facts": decision.known_facts,
+            "missing_information": decision.missing_information,
+            "approved_evidence": [
+                {"source": item.source, "excerpt": item.excerpt}
+                for item in snapshot.knowledge_evidence
+                if item.valid
+            ],
+        }
+        history = [
+            {"role": "user" if item.role == "consumer" else "assistant", "content": item.content}
+            for item in snapshot.chat_history[-12:]
+            if item.role in {"consumer", "agent"}
+        ]
+        payload = {
+            "model": self.model,
+            "temperature": 0.2,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "你是美妆品牌人工客服的 AI 助手。fixed_decision 是后端已经完成的安全决策，"
+                        "不得修改服务模式、风险、发送权限或下一步动作。只根据已提供事实和审核依据"
+                        "生成简洁、共情、可供当前 reply_audience 使用的中文草稿。不得编造订单状态、"
+                        "政策、功效、医学判断、孕产可用性或赔偿结果。缺少依据时必须明确需要人工核实。"
+                        '仅返回 JSON：{"message": "回复草稿"}。'
+                    ),
+                },
+                *history,
+                {"role": "user", "content": json.dumps(context, ensure_ascii=False)},
+            ],
+            "response_format": {"type": "json_object"},
+        }
+        result = self._completion(payload)
+        message = result.get("message")
+        if not isinstance(message, str) or not message.strip() or len(message) > 8000:
+            raise ValueError("LLM competition reply is invalid")
+        return message.strip()
