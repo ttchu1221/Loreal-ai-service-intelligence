@@ -29,6 +29,8 @@
   AUTO_REPLY 知识门禁、校验规则和 runtime 接入边界。
 - [Eval 案例数据转换](evaluation-data-conversion.md)：12 条验收案例的输入隔离、离线 Eval 和证据
   review overlay。
+- [V1 当前已知问题](v1-known-issues.md)：12 条 reviewed Eval 通过后仍存在的数据、AUTO_REPLY、
+  runtime integration 和 production 接入限制。
 
 当前可运行的是本地 P0 主链路、deterministic Mock 与可选 LLM intent/上下文回复 adapter。真实 RAG、外部售后、
 认证授权、通知送达和 production 验收尚未完成，不能因 contract 或 Mock 存在而标记为已集成。
