@@ -9,6 +9,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- Eval 支持应用只降级、不提权的证据 review overlay，并为匿名商品无法匹配官方 SKU 的案例保留
+  来源、原因和版本审计标记。
 - 消费者工作台移除“当前产品”和默认“演示粉底”输入，不再把测试产品静默附加到每条消息；产品
   上下文改由对话、订单或工单识别，缺失且影响回答时再由 AI 澄清。
 - 人工客服工作台将完整 transcript 改为与消费者端一致的聊天气泡布局，交接摘要折叠展示；客服可在
@@ -38,6 +40,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- 新增三产品知识库与三情景语义库 XLSX 转换器，将审核通过的商品知识、三模式语义规则、关键词、
+  问题样例、冲突规则和红线转换为可审计 JSON；待核验、冲突、缺失及仅禁止项不会进入有效
+  `AUTO_REPLY` evidence，并补充原子写入和一致性回归测试。
 - `LLM_ENABLED=true` 时自动为比赛版创建 OpenAI-compatible 话术 provider，在确定性安全决策后生成
   消费者回复或客服草稿；模型失败保留可见降级且不能修改模式、风险和发送权限。
 - 新增正式 Eval JSON runner，以隔离的 deterministic baseline 逐条执行案例，输出服务模式准确率、

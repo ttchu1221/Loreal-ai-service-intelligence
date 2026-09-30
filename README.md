@@ -134,6 +134,26 @@ scripts/check.sh
   data/processed/ai_eval_report.json --reference-date 2026-09-30
 ```
 
+当证据核验发现原标注允许了无法安全自动发送的案例时，先应用只降级、不提权的 review overlay：
+
+```bash
+.venv/bin/python scripts/apply_eval_evidence_review.py \
+  data/processed/ai_eval_cases_v2.json \
+  config/eval_evidence_review_v1.json \
+  data/processed/ai_eval_cases_v2_evidence_reviewed.json
+```
+
+将三产品知识卡、三模式语义库和关键词表转换为可审计 JSON：
+
+```bash
+.venv/bin/python scripts/convert_product_knowledge.py source.xlsx \
+  data/processed/three_product_knowledge_routing_v1.json
+```
+
+转换器只把“已登记、允许自动引用且来源可追踪”的内容写入有效知识；待核验、冲突、缺失和红线内容
+会保留在排除清单中。字段、门禁和 runtime 接入边界见
+[三产品知识与三情景语义库转换](docs/product-knowledge-conversion.md)。
+
 ## 项目结构
 
 ```text

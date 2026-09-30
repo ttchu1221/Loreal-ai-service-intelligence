@@ -1,0 +1,49 @@
+{
+  "schema_version": "1.0",
+  "review_version": "internet-evidence-review-v1",
+  "reviewed_at": "2026-09-30T00:00:00+08:00",
+  "policy": {
+    "change_scope": "仅允许将证据不足的 AUTO_REPLY 保守降级，不允许通过 review overlay 提升自动发送权限。",
+    "product_match_requirement": "匿名商品名、通用品类知识或其他市场的近似产品不得冒充当前商品 SKU。"
+  },
+  "reviews": [
+    {
+      "case_id": "C-001",
+      "original_service_mode": "AUTO_REPLY",
+      "recommended_service_mode": "AGENT_ASSIST",
+      "auto_reply_eligible": false,
+      "reason": "匿名名称“测试修护精华液30ml”无法唯一匹配具体 SKU；官方资料显示不同精华配方的冷藏建议可能不同。",
+      "sources": [
+        {
+          "title": "L'Oréal Paris FAQ – Wie lagert man Seren richtig?",
+          "url": "https://www.loreal-paris.de/faqs",
+          "supported_fact": "精华通常应阴凉、干燥、避光保存；部分维生素 C 或视黄醇精华可能适合冷藏。"
+        },
+        {
+          "title": "L'Oréal Paris Revitalift Derm Intensives Pure Hyaluronic Acid Serum",
+          "url": "https://www.lorealparisusa.com/skin-care/face-serums/revitalift-derm-intensives-pure-hyaluronic-acid-serum",
+          "supported_fact": "该具体美国市场玻尿酸精华建议室温保存并远离阳光或强光，但不能套用于匿名商品。"
+        }
+      ]
+    },
+    {
+      "case_id": "C-004",
+      "original_service_mode": "AUTO_REPLY",
+      "recommended_service_mode": "AGENT_ASSIST",
+      "auto_reply_eligible": false,
+      "reason": "公开官方页面无法验证“#01赤茶红/#05枫叶红”对应的具体系列和 SKU，不能套用其他雾面口红的保湿宣称。",
+      "sources": [
+        {
+          "title": "L'Oréal Paris Ultimate Guide to Lipstick",
+          "url": "https://www.lorealparisusa.com/beauty-magazine/makeup/lip-makeup/ultimate-guide-to-lipstick",
+          "supported_fact": "部分雾面口红可能产生干燥感或突出唇部纹理，具体感受取决于配方和唇部状态。"
+        },
+        {
+          "title": "L'Oréal Paris Colour Riche Blurred Matte Lipstick",
+          "url": "https://www.lorealparisusa.com/makeup/lip-color/lipstick/colour-riche-blurred-matte-lipstick",
+          "supported_fact": "该具体美国市场产品有柔焦雾面和保湿描述，但不能套用于未匹配的匿名商品。"
+        }
+      ]
+    }
+  ]
+}

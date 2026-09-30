@@ -25,6 +25,10 @@
 - [比赛版 P0 验收执行记录](p0-acceptance-evidence.md)：TC01 至 TC30 的工程验证与测试定位。
 - [ADR 001 Provider和决策边界](adr/001-provider-and-decision-boundaries.md)：AI contract 与安全优先
   注入决策；当前状态为 Proposed，尚待 1、3 号共同冻结。
+- [三产品知识与三情景语义库转换](product-knowledge-conversion.md)：XLSX 到可审计 JSON 的字段、
+  AUTO_REPLY 知识门禁、校验规则和 runtime 接入边界。
+- [Eval 案例数据转换](evaluation-data-conversion.md)：12 条验收案例的输入隔离、离线 Eval 和证据
+  review overlay。
 
 当前可运行的是本地 P0 主链路、deterministic Mock 与可选 LLM intent/上下文回复 adapter。真实 RAG、外部售后、
 认证授权、通知送达和 production 验收尚未完成，不能因 contract 或 Mock 存在而标记为已集成。

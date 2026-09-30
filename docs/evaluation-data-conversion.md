@@ -58,3 +58,29 @@ MongoDB，也不会读取本地 `.env` 或发起外部请求。
 
 这些指标需要产品方补充稳定 taxonomy、完整订单/工单/知识 snapshot，以及人工或独立 LLM judge
 rubric。报告的 `manual_review` 仅在系统完成决策后附加，绝不会传入模型或业务服务。
+
+## 证据核验修订
+
+原始标注必须保留。若官方来源核验后发现某条 `AUTO_REPLY` 缺少唯一商品匹配、有效知识或自动引用
+权限，使用 review overlay 生成新版本：
+
+```bash
+.venv/bin/python scripts/apply_eval_evidence_review.py \
+  data/processed/ai_eval_cases_v2.json \
+  config/eval_evidence_review_v1.json \
+  data/processed/ai_eval_cases_v2_evidence_reviewed.json
+```
+
+overlay 会在每个修订案例中写入 `evidence_review`，并在 dataset 顶层写入
+`evidence_review_summary`。它只能把服务模式向更保守方向调整：`AUTO_REPLY` → `AGENT_ASSIST` →
+`HUMAN_REQUIRED`，不能提升自动发送权限。每项修订必须提供原因、HTTPS 来源和来源支持的事实；原始
+`revision_notes` 会保留并追加版本标记。
+
+`config/eval_evidence_review_v1.json` 当前记录两项修订：
+
+- C-001：匿名精华无法唯一匹配具体 SKU，通用品类资料不能证明该商品无需冷藏；
+- C-004：匿名色号无法映射到具体口红系列，不能套用其他配方的保湿或不拔干宣称。
+
+因此两项均从 `AUTO_REPLY` 修订为 `AGENT_ASSIST`。这是证据边界修订，不是根据模型输出反向修改
+答案；后续获得中国市场准确商品、SKU 和已审核知识后，应新增 review 版本重新评估，而不是覆盖
+本次审计记录。
