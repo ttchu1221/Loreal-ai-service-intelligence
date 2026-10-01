@@ -376,6 +376,11 @@ def test_minimum_workspaces_are_available() -> None:
     assert "flex:0 0 auto;padding:18px 24px" in consumer
     assert "message.value='发生在涂粉底后" not in consumer
     assert "restoreConversation()" in consumer
+    assert "function recoverIncompleteConversation(b)" in consumer
+    assert "b.transcript.some(x=>x.role==='user')&&!hasReply" in consumer
+    assert "旧版会话没有保存 AI 回复" in consumer
+    assert "type==='system'?'系统提示'" in consumer
+    assert "messageInput.value=latestUser?.content||''" in consumer
     assert "if(['HANDOFF','BLOCK'].includes(b.state))startPolling()" in consumer
     assert "历史会话已失效，请重新开始咨询" in consumer
     assert "转人工" in consumer

@@ -129,6 +129,10 @@ def test_generates_contextual_response_with_fixed_decision_and_evidence() -> Non
     assert "更在意上妆后起屑" in message
     payload = observed["payload"]
     assert payload["temperature"] == 0.3
+    system_prompt = payload["messages"][0]["content"]
+    assert "共情/致歉 → 已核实事实或待核实项 → 下一步动作" in system_prompt
+    assert "不得使用“亲亲”" in system_prompt
+    assert "不索取完整身份证件、银行卡、支付账号" in system_prompt
     context = json.loads(payload["messages"][-1]["content"])
     assert context["fixed_state"] == "GUIDE"
     assert context["approved_evidence"] == ["减少妆前产品用量"]
@@ -155,6 +159,80 @@ def test_rejects_blank_generated_response() -> None:
 
     with pytest.raises(ValueError, match="message is invalid"):
         provider.generate(ConversationRequest(message="怎么用"), card, None)
+
+
+def test_generates_evidence_free_reply_without_business_claims() -> None:
+    observed = {}
+
+    def transport(request, _timeout):
+        observed["payload"] = json.loads(request.data)
+        return _response({"message": "在的，请直接告诉我想咨询的问题。"})
+
+    provider = OpenAICompatibleIntentProvider(
+        api_key="test-secret",
+        base_url="https://llm.example/v1",
+        model="demo-model",
+        timeout_seconds=1,
+        retry_limit=0,
+        transport=transport,
+    )
+    card = EmpathyCard(
+        conversation_id="conv_1",
+        surface_issue="你好呀",
+        intent=Intent.CONSULT,
+        intent_source="evidence_free_rules:greeting",
+        scenario="product_consultation",
+        missing_information=["具体咨询问题"],
+        risk_level=RiskLevel.LOW,
+        next_state=ConversationState.ASK,
+        schema_version="1.0",
+    )
+
+    message = provider.generate(ConversationRequest(message="你好呀"), card, None)
+
+    assert message == "在的，请直接告诉我想咨询的问题。"
+    payload = observed["payload"]
+    assert "不得新增产品、功效、订单" in payload["messages"][0]["content"]
+    context = json.loads(payload["messages"][-1]["content"])
+    assert context["business_evidence_required"] is False
+    assert context["approved_evidence"] == []
+
+
+def test_generates_generic_guidance_without_presenting_it_as_product_fact() -> None:
+    observed = {}
+
+    def transport(request, _timeout):
+        observed["payload"] = json.loads(request.data)
+        return _response({"message": "无法确认这款配方；可以先少量试涂并观察唇部感受。"})
+
+    provider = OpenAICompatibleIntentProvider(
+        api_key="test-secret",
+        base_url="https://llm.example/v1",
+        model="demo-model",
+        timeout_seconds=1,
+        retry_limit=0,
+        transport=transport,
+    )
+    card = EmpathyCard(
+        conversation_id="conv_1",
+        surface_issue="不知道具体系列",
+        intent=Intent.PURCHASE,
+        intent_source="generic_product_guidance_rules",
+        scenario="product_selection",
+        confirmed_facts=["这个口红会不会拔干", "不知道具体系列"],
+        missing_information=["具体商品身份仍未确认"],
+        risk_level=RiskLevel.LOW,
+        next_state=ConversationState.RESOLVE,
+        schema_version="1.0",
+    )
+
+    provider.generate(ConversationRequest(message="不知道具体系列"), card, None)
+
+    payload = observed["payload"]
+    assert "仍需回答用户问题" in payload["messages"][0]["content"]
+    assert "不得表述成该商品的官方结论" in payload["messages"][0]["content"]
+    context = json.loads(payload["messages"][-1]["content"])
+    assert context["business_evidence_required"] is False
 
 
 def test_rejects_ask_response_with_multiple_questions() -> None:

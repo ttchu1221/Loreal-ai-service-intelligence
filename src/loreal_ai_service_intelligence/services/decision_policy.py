@@ -18,6 +18,11 @@ from loreal_ai_service_intelligence.providers.interfaces import (
     KnowledgeProvider,
 )
 from loreal_ai_service_intelligence.providers.safety import SafetyPolicy
+from loreal_ai_service_intelligence.services.evidence_policy import (
+    EvidenceFreeIntent,
+    EvidenceRequirement,
+    RuleBasedEvidenceRequirementPolicy,
+)
 
 
 class SafetyFirstDecisionPolicy:
@@ -83,6 +88,7 @@ class DeterministicDecisionPolicy:
         self.intent_provider = intent_provider
         self.knowledge = knowledge_provider
         self.safety = safety_policy
+        self.evidence_policy = RuleBasedEvidenceRequirementPolicy()
 
     def decide(
         self,
@@ -92,6 +98,7 @@ class DeterministicDecisionPolicy:
     ) -> EmpathyCard:
         text = request.message
         declined_handoff = self._declines_human_service(text)
+        evidence_decision = self.evidence_policy.classify(text)
         risk_terms = self.safety.active_risk_terms(text)
         confirmed = list(
             dict.fromkeys(
@@ -129,6 +136,27 @@ class DeterministicDecisionPolicy:
             intent = Intent.COMPLAINT
             intent_confidence = 1.0
             intent_source = "safety_rules"
+        elif evidence_decision.requirement == EvidenceRequirement.NOT_REQUIRED:
+            is_opening = evidence_decision.evidence_free_intent in {
+                EvidenceFreeIntent.GREETING,
+                EvidenceFreeIntent.CAPABILITY,
+                EvidenceFreeIntent.META_HELP,
+                EvidenceFreeIntent.CLARIFICATION,
+            }
+            state = ConversationState.ASK if is_opening else ConversationState.RESOLVE
+            risk = RiskLevel.LOW
+            missing = (
+                ["需要解释的上一条内容"]
+                if evidence_decision.evidence_free_intent == EvidenceFreeIntent.CLARIFICATION
+                and existing is None
+                else ["具体咨询问题"]
+                if is_opening
+                else []
+            )
+            refs = []
+            intent = Intent.CONSULT
+            intent_confidence = 1.0
+            intent_source = evidence_decision.source
         elif self._needs_pilling_details(text, existing):
             state = ConversationState.ASK
             risk = RiskLevel.LOW
@@ -175,6 +203,14 @@ class DeterministicDecisionPolicy:
                 state = ConversationState.GUIDE
             elif refs:
                 state = ConversationState.RESOLVE
+            elif self._needs_product_identity(text, request, existing):
+                state = ConversationState.ASK
+                missing = ["产品完整名称、系列或商品链接（如方便提供）"]
+                intent_source = "product_identity_clarification_rules"
+            elif self._can_offer_generic_product_guidance(existing):
+                state = ConversationState.RESOLVE
+                missing = ["具体商品身份仍未确认"]
+                intent_source = "generic_product_guidance_rules"
             elif declined_handoff:
                 state = ConversationState.ASK
                 missing = ["希望 AI 继续处理的具体问题"]
@@ -256,6 +292,58 @@ class DeterministicDecisionPolicy:
         )
         return not any(term in text for term in informative) or any(
             term in text for term in ("不知道", "不清楚", "不会判断")
+        )
+
+    @staticmethod
+    def _needs_product_identity(
+        text: str,
+        request: ConversationRequest,
+        existing: StoredConversation | None,
+    ) -> bool:
+        """只在答案依赖具体配方时追问一次；商品信息不是所有咨询的必填项。"""
+        if request.product or (existing and existing.empathy_card.entities.get("product")):
+            return False
+        if existing and any(
+            "产品完整名称" in item for item in existing.empathy_card.missing_information
+        ):
+            return False
+        product_terms = (
+            "口红",
+            "唇膏",
+            "唇釉",
+            "粉底",
+            "气垫",
+            "遮瑕",
+            "防晒",
+            "面霜",
+            "精华",
+            "乳液",
+        )
+        product_fact_terms = (
+            "色号",
+            "几号",
+            "#",
+            "适合",
+            "显白",
+            "拔干",
+            "质地",
+            "成膜",
+            "保湿",
+            "持妆",
+            "遮瑕",
+            "怎么用",
+        )
+        return any(term in text for term in product_terms) and any(
+            term in text for term in product_fact_terms
+        )
+
+    @staticmethod
+    def _can_offer_generic_product_guidance(existing: StoredConversation | None) -> bool:
+        return bool(
+            existing
+            and any("产品完整名称" in item for item in existing.empathy_card.missing_information)
+            and existing.empathy_card.risk_level == RiskLevel.LOW
+            and existing.empathy_card.intent in {Intent.CONSULT, Intent.PURCHASE, Intent.USAGE}
         )
 
     @staticmethod

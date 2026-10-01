@@ -50,7 +50,12 @@ scripts/dev.sh config/production.example
 当前 adapter 使用 OpenAI-compatible `/chat/completions`，适用于支持相同 contract 的供应商。它
 先输出经过 Schema 校验的 intent，再在确定性决策完成后根据最近对话、当前消息、状态和已审核依据
 生成消费者话术。生成模型不能修改状态，也不能补充未提供的知识；`BLOCK`、`HANDOFF` 不调用生成
-模型。非法、空白、超长输出或调用异常均回退确定性模板。
+模型。通过 evidence requirement gate 的寒暄、致谢、确认、告别、能力询问、问题描述帮助和话术
+澄清也可调用生成模型，但 prompt 仅允许处理当前对话行为和复述已有 transcript，不允许新增产品、
+订单、物流、售后、政策或健康事实。非法、空白、超长输出或调用异常均回退确定性模板。
+消费者回复和人工客服草稿共同使用[客服回复话术规范](customer-service-voice.md)：先响应诉求和情绪，
+再区分已确认事实与待核实项，并给出单一清晰动作；该规范会排除语料中的过度卖萌、无依据承诺和
+敏感信息索取，不会把历史聊天原文发送给模型。
 intent 阶段输出 `intent`、`confidence` 和后端生成的 `source`；回复阶段只输出消费者可见的
 `message`，两个阶段都不能执行状态变化：
 

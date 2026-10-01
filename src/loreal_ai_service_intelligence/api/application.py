@@ -537,7 +537,8 @@ animation:rise .24s ease-out;flex:0 0 auto}
 .bubble.ai,.bubble.agent{align-self:flex-start;background:#fff;border:1px solid var(--line);border-bottom-left-radius:5px;
 box-shadow:0 7px 22px rgba(66,40,49,.06)}.bubble.user{align-self:flex-end;background:var(--ink);
 color:#fff;border-bottom-right-radius:5px}.bubble.agent{border-color:#d99aae;background:#fff4f7}.bubble.error{align-self:flex-start;background:#fff4f4;color:#8a2330;
-border:1px solid #efc7cc}.bubble small{display:block;margin-top:8px;opacity:.58;font-size:11px}
+border:1px solid #efc7cc}.bubble.system{align-self:flex-start;background:#f7f3f4;color:#69585e;
+border:1px dashed #cfbcc2}.bubble small{display:block;margin-top:8px;opacity:.58;font-size:11px}
 .composer{flex:0 0 auto;padding:18px 24px 22px;border-top:1px solid var(--line);background:#fff}.input-wrap{display:flex;align-items:flex-end;
 gap:10px;background:#f6f1ef;border:1px solid transparent;border-radius:20px;padding:7px 8px 7px 16px}
 .input-wrap:focus-within{border-color:#cf9dad;background:#fff}textarea{flex:1;resize:none;border:0;background:transparent;
@@ -598,7 +599,8 @@ const b=r.status===204?{}:await r.json();
 if(!r.ok)throw new Error(b.detail||`HTTP ${r.status}`);return b;}
 function addBubble(text,type='ai'){const bubble=document.createElement('div');bubble.className=`bubble ${type}`;
 bubble.textContent=text;const meta=document.createElement('small');meta.textContent=
-type==='user'?'你 · 刚刚':type==='agent'?'人工客服 · 刚刚':type==='error'?'发送失败':'AI 顾问 · 刚刚';bubble.append(meta);
+type==='user'?'你 · 刚刚':type==='agent'?'人工客服 · 刚刚':type==='error'?'发送失败':
+type==='system'?'系统提示':'AI 顾问 · 刚刚';bubble.append(meta);
 messagesList.append(bubble);messagesList.scrollTop=messagesList.scrollHeight;}
 function showError(error){const detail=String(error.message||error);const friendly=
 detail==='Failed to fetch'?'网络连接失败，请确认服务正在运行后重试':detail;
@@ -629,6 +631,15 @@ resolvedButtonEl.disabled=true;unresolvedButtonEl.disabled=true;confirmButtonEl.
 reopenButtonEl.disabled=true;aiStepEl.classList.remove('active');agentStepEl.classList.remove('active');
 doneStepEl.classList.remove('active');ticketPanelEl.textContent='AI 无法可靠回答或你主动选择人工时，\\n这里会同步客服进度和回复。';
 messageInput.focus();}
+function recoverIncompleteConversation(b){const latestUser=[...b.transcript].reverse().find(x=>x.role==='user');
+if(pollTimer){clearInterval(pollTimer);pollTimer=null;}localStorage.removeItem('lorealConversationId');
+conversationId=null;resultId=null;messagesList.replaceChildren();addBubble(welcomeText);
+addBubble('检测到旧版会话没有保存 AI 回复，已为你开始新会话。原问题已保留，请重新发送。','system');
+sessionEl.textContent='旧版会话不完整 · 已开始新会话';messageInput.value=latestUser?.content||'';
+messageInput.placeholder='请重新发送原问题……';handoffButtonEl.disabled=true;resolvedButtonEl.disabled=true;
+unresolvedButtonEl.disabled=true;confirmButtonEl.disabled=true;reopenButtonEl.disabled=true;
+aiStepEl.classList.remove('active');agentStepEl.classList.remove('active');doneStepEl.classList.remove('active');
+ticketPanelEl.textContent='AI 无法可靠回答或你主动选择人工时，\\n这里会同步客服进度和回复。';messageInput.focus();}
 async function handoff(){try{const b=await call(`/v1/conversations/${conversationId}/handoff`,
 {method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(
 {accepted:true,idempotency_key:`demo-${conversationId}`})});show(b);startPolling();}
@@ -658,7 +669,9 @@ async function feedback(resolved){try{await call(`/v1/conversations/${conversati
 addBubble(`已记录你的反馈：${resolved?'问题已解决':'问题未解决'}`);}
 catch(e){addBubble(`操作失败：${e.message}`);}}
 async function restoreConversation(){if(!conversationId)return;try{const b=await call(
-`/v1/conversations/${conversationId}`);messagesList.replaceChildren();b.transcript.forEach(x=>
+`/v1/conversations/${conversationId}`);const hasReply=b.transcript.some(x=>
+x.role==='assistant'||x.role==='agent');if(b.transcript.some(x=>x.role==='user')&&!hasReply){
+recoverIncompleteConversation(b);return;}messagesList.replaceChildren();b.transcript.forEach(x=>
 addBubble(x.content,x.role==='user'?'user':x.role==='agent'?'agent':'ai'));resultId=b.last_result_id;
 const agentMessages=b.transcript.filter(x=>x.role==='agent');lastAgentReply=agentMessages.length?
 agentMessages[agentMessages.length-1].content:null;

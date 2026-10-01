@@ -316,6 +316,40 @@ class ConversationOrchestrator:
 
     @staticmethod
     def _consumer_copy(card: EmpathyCard) -> tuple[str, list[str]]:
+        evidence_free_replies = {
+            "evidence_free_rules:greeting": (
+                "在的，你可以直接告诉我遇到的问题，我会先帮你分析，需要时再为你转接人工客服。"
+            ),
+            "evidence_free_rules:gratitude": "不客气。如果还有其他问题，可以继续告诉我。",
+            "evidence_free_rules:acknowledgement": "好的。如果还需要继续处理，请直接告诉我。",
+            "evidence_free_rules:farewell": "好的，再见。之后需要帮助时可以随时回来咨询。",
+            "evidence_free_rules:capability": (
+                "我是智慧美妆顾问，可以协助理解美妆咨询、梳理问题并在需要时转接人工客服。"
+            ),
+            "evidence_free_rules:meta_help": (
+                "你可以直接说遇到的现象、涉及的商品或订单，以及希望解决什么；不确定的信息可以先不填。"
+            ),
+            "evidence_free_rules:clarification": (
+                "可以。请告诉我是哪一句没有理解，我会换一种更简单的方式说明。"
+            ),
+        }
+        if card.intent_source in evidence_free_replies:
+            return evidence_free_replies[card.intent_source], ["reply"]
+        if card.intent_source == "generic_product_guidance_rules":
+            context = " ".join(card.confirmed_facts)
+            if any(term in context for term in ("拔干", "唇纹", "质地")):
+                return (
+                    "暂时无法确认这款具体配方是否拔干。一般来说，雾面妆效比滋润型更容易显唇纹，"
+                    "但实际感受会因唇部状态而不同；可以先少量试涂，觉得偏干时先做好唇部保湿，"
+                    "并在饮水或进食后按需补涂。",
+                    ["feedback", "new_question"],
+                )
+            return (
+                "暂时无法确认这个系列两个色号的实际上唇效果。可以先按商品页的官方色调说明和"
+                "你想要的妆效筛选，并尽量在线下或可靠试色图中确认；我不会只根据色号名称替你"
+                "下绝对结论。",
+                ["feedback", "new_question"],
+            )
         if card.next_state == ConversationState.BLOCK:
             return (
                 "你提到的情况需要谨慎处理。请先停止继续使用相关产品，避免自行叠加其他刺激性产品；"
@@ -334,6 +368,12 @@ class ConversationOrchestrator:
                         "confirm_handoff",
                     ],
                 )
+            if any("产品完整名称" in item for item in card.missing_information):
+                return (
+                    "为了确认你问的是哪一款，可以发一下产品完整名称、系列或商品链接；"
+                    "如果手边没有这些信息，也可以直接说“不清楚”，我会按现有信息继续处理。",
+                    ["reply", "skip", "confirm_handoff"],
+                )
             return "为了更准确地给出建议，请告诉我你的肤色冷暖调，或你偏好的妆效。", ["reply"]
         if card.next_state == ConversationState.HANDOFF:
             if card.intent_source == "user_handoff_rules":
@@ -346,9 +386,11 @@ class ConversationOrchestrator:
                 return message, [
                     "view_ticket",
                 ]
-            return "当前没有足够的已审核依据来安全回答，现有沟通内容已自动提交给人工客服跟进。", [
-                "view_ticket",
-            ]
+            return (
+                "这个问题需要进一步核实。我已经把您刚才的描述和对话记录同步给人工客服，"
+                "您无需重复说明，客服会继续为您处理。",
+                ["view_ticket"],
+            )
         labels = {
             Intent.USAGE: "使用指引",
             Intent.PURCHASE: "选购指引",

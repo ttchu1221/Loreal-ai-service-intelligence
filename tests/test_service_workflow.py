@@ -137,6 +137,133 @@ def test_explicit_handoff_decline_does_not_create_ticket(tmp_path) -> None:
     assert client.get("/v1/agent/events").json() == []
 
 
+def test_greeting_stays_in_ai_conversation_without_creating_ticket(tmp_path) -> None:
+    client = make_client(tmp_path)
+
+    for message in ("在吗", "您好！", " 客服在吗？ "):
+        response = client.post("/v1/conversations", json={"message": message})
+
+        assert response.status_code == 201
+        body = response.json()
+        assert body["state"] == "ASK"
+        assert body["event_id"] is None
+        assert "在的" in body["message"]
+
+    assert client.get("/v1/agent/events").json() == []
+
+
+def test_greeting_with_real_question_still_uses_normal_routing(tmp_path) -> None:
+    client = make_client(tmp_path)
+
+    response = client.post("/v1/conversations", json={"message": "你好，面霜应该怎么用？"})
+
+    assert response.status_code == 201
+    assert response.json()["state"] == "RESOLVE"
+    assert response.json()["evidence"][0]["knowledge_id"] == "KB-USAGE-001"
+
+
+def test_product_specific_question_answers_safely_when_identity_is_unavailable(tmp_path) -> None:
+    client = make_client(tmp_path)
+
+    first = client.post(
+        "/v1/conversations",
+        json={"message": "我黄二白，口红选#01赤茶红还是#05枫叶红呀"},
+    ).json()
+
+    assert first["state"] == "ASK"
+    assert first["event_id"] is None
+    assert "产品完整名称" in first["message"]
+    assert "不清楚" in first["message"]
+
+    second = client.post(
+        f"/v1/conversations/{first['conversation_id']}/messages",
+        json={"message": "我也不清楚具体系列"},
+    ).json()
+
+    assert second["state"] == "RESOLVE"
+    assert second["event_id"] is None
+    assert "无法确认" in second["message"]
+    assert "不会只根据色号名称" in second["message"]
+
+
+def test_unknown_lipstick_texture_gets_generic_guidance_without_product_claim(tmp_path) -> None:
+    client = make_client(tmp_path)
+    first = client.post(
+        "/v1/conversations",
+        json={"message": "这个口红会不会拔干？我的唇纹有点深"},
+    ).json()
+
+    second = client.post(
+        f"/v1/conversations/{first['conversation_id']}/messages",
+        json={"message": "我不知道具体系列"},
+    ).json()
+
+    assert first["state"] == "ASK"
+    assert second["state"] == "RESOLVE"
+    assert second["event_id"] is None
+    assert "无法确认这款具体配方" in second["message"]
+    assert "雾面妆效" in second["message"]
+    assert "实际感受" in second["message"]
+
+
+def test_known_generic_knowledge_does_not_require_product_identity(tmp_path) -> None:
+    client = make_client(tmp_path)
+
+    body = client.post("/v1/conversations", json={"message": "第一次使用面霜，应该怎么用？"}).json()
+
+    assert body["state"] == "RESOLVE"
+    assert body["event_id"] is None
+
+
+def test_other_evidence_free_intents_reply_without_creating_ticket(tmp_path) -> None:
+    client = make_client(tmp_path)
+
+    examples = {
+        "谢谢": "不客气",
+        "收到": "好的",
+        "再见": "再见",
+        "你是谁？": "智慧美妆顾问",
+        "你好呀": "在的",
+        "在不在呀": "在的",
+        "好的呢": "好的",
+        "谢谢你的帮助": "不客气",
+        "我该怎么描述问题": "遇到的现象",
+        "你刚才说的是什么意思": "哪一句",
+    }
+    for message, expected_reply in examples.items():
+        body = client.post("/v1/conversations", json={"message": message}).json()
+        assert body["state"] in {"ASK", "RESOLVE"}
+        assert body["evidence"] == []
+        assert body["event_id"] is None
+        assert expected_reply in body["message"]
+
+    assert client.get("/v1/agent/events").json() == []
+
+
+def test_evidence_free_intent_uses_llm_when_configured(tmp_path) -> None:
+    del tmp_path
+    client = TestClient(
+        create_app(MemoryRepository(), response_provider=ContextAwareResponseProvider())
+    )
+
+    body = client.post("/v1/conversations", json={"message": "你好呀"}).json()
+
+    assert body["state"] == "ASK"
+    assert "你好呀" in body["message"]
+    assert body["event_id"] is None
+
+
+def test_evidence_free_llm_failure_uses_safe_template(tmp_path) -> None:
+    del tmp_path
+    client = TestClient(create_app(MemoryRepository(), response_provider=FailingResponseProvider()))
+
+    body = client.post("/v1/conversations", json={"message": "谢谢你的帮助"}).json()
+
+    assert body["state"] == "RESOLVE"
+    assert body["message"] == "不客气。如果还有其他问题，可以继续告诉我。"
+    assert body["event_id"] is None
+
+
 def test_shade_question_asks_once_then_resolves_without_repeating_fact(tmp_path) -> None:
     client = make_client(tmp_path)
     first = client.post("/v1/conversations", json={"message": "我想选粉底色号"}).json()
@@ -191,7 +318,9 @@ def test_unknown_knowledge_fails_explicitly_to_handoff(tmp_path) -> None:
 
     assert response.status_code == 201
     assert response.json()["state"] == "HANDOFF"
-    assert "没有足够的已审核依据" in response.json()["message"]
+    assert "需要进一步核实" in response.json()["message"]
+    assert "无需重复说明" in response.json()["message"]
+    assert "审核依据" not in response.json()["message"]
     assert response.json()["event_status"] == "waiting_for_agent"
 
 
