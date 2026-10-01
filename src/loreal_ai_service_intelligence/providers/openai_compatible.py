@@ -10,6 +10,7 @@ from urllib.request import Request, urlopen
 
 from loreal_ai_service_intelligence.domain.competition import P0ContextSnapshot, P0Decision
 from loreal_ai_service_intelligence.domain.models import (
+    ConsumerReplyGeneration,
     ConversationRequest,
     ConversationState,
     EmpathyCard,
@@ -81,7 +82,7 @@ class OpenAICompatibleIntentProvider:
         request: ConversationRequest,
         card: EmpathyCard,
         existing: StoredConversation | None,
-    ) -> str:
+    ) -> ConsumerReplyGeneration:
         """基于上下文生成话术，但不允许模型修改上游决策。"""
         history = []
         if existing:
@@ -89,12 +90,26 @@ class OpenAICompatibleIntentProvider:
                 {"role": item.role, "content": item.content} for item in existing.transcript[-8:]
             ]
         evidence = [ref.excerpt for ref in card.knowledge_refs]
+        suggested_replies = self._suggested_replies(card)
         evidence_required = not (
             card.intent_source.startswith("evidence_free_rules:")
             or card.intent_source == "generic_product_guidance_rules"
         )
+        recommendation_knowledge_ids = {
+            "KB-LOREAL-CN-HOT-SERUM-001",
+            "KB-LOREAL-CN-HOT-MOISTURIZER-001",
+            "KB-LOREAL-CN-HOT-MASK-001",
+            "KB-LOREAL-CN-LIP-001",
+        }
+        is_direct_recommendation = bool(
+            card.next_state == ConversationState.RESOLVE
+            and any(ref.knowledge_id in recommendation_knowledge_ids for ref in card.knowledge_refs)
+        )
         constraints = {
-            ConversationState.ASK: "只追问一个最关键的问题，不给未经证实的结论。",
+            ConversationState.ASK: (
+                "只追问一个最关键的问题，不给未经证实的结论。能枚举时优先给出 2–4 个互斥短选项，"
+                "并包含“不清楚”或“不确定”；只有商品名、订单号等无法枚举的信息才使用开放问题。"
+            ),
             ConversationState.GUIDE: "只给一个可执行步骤，说明观察目标；只能使用提供的审核依据。",
             ConversationState.RESOLVE: "直接回答用户当前问题；只能使用提供的审核依据。",
             ConversationState.HANDOFF: "说明转人工原因，并告知历史对话会同步，不继续猜测答案。",
@@ -113,6 +128,14 @@ class OpenAICompatibleIntentProvider:
                 "能力询问、问题描述帮助或对上一轮话术的解释；可以使用对话中已有内容进行复述，"
                 "但不得新增产品、功效、订单、物流、售后、政策或健康事实。"
             )
+        elif is_direct_recommendation:
+            response_constraint = (
+                "用户已经给出了可用于匹配的需求条件。必须结合 current_message、known_facts 和"
+                "对话历史，从 approved_evidence 中选择与这些条件直接匹配的一个主推荐，并说明"
+                "匹配的是哪个用户条件和哪条依据；不得固定推荐 evidence 中排在第一的候选。"
+                "不能反问偏好，也不能追加开放问题。明确区分官网展示、热门搜索与销量排名，"
+                "不扩展任何未提供的功效、肤色适配或使用感承诺。"
+            )
         context = {
             "fixed_state": card.next_state.value,
             "intent": card.intent.value,
@@ -123,6 +146,16 @@ class OpenAICompatibleIntentProvider:
             "approved_evidence": evidence,
             "business_evidence_required": evidence_required,
             "current_message": request.message,
+            "allowed_suggested_replies": suggested_replies,
+            "available_evidence_media": [
+                {
+                    "knowledge_id": ref.knowledge_id,
+                    "description": ref.image_alt,
+                    "review_status": ref.media_review_status,
+                }
+                for ref in card.knowledge_refs
+                if ref.image_url
+            ],
         }
         payload = {
             "model": self.model,
@@ -136,7 +169,18 @@ class OpenAICompatibleIntentProvider:
                         "改变状态或越过边界。不得编造产品、功效、订单、政策、医学结论或审核依据。"
                         f"当前回复约束：{response_constraint}"
                         f"\n{CUSTOMER_SERVICE_VOICE_PROMPT}"
-                        '仅返回 JSON：{"message": "消费者可见回复"}。'
+                        "如果 allowed_suggested_replies 非空，结尾只能逐字使用其中的选项，"
+                        "不得新增、删减、改名、编号或换成另一组维度；正文先给简短的初步判断和"
+                        "边界，再自然邀请用户选择。"
+                        "请自主判断图片是否能实质帮助用户理解当前回答；只有确实有帮助时，才从"
+                        "available_evidence_media 选择对应 knowledge_id。不要因为知识有图片就默认"
+                        "附图，也不得输出列表之外的 ID。pending 图片只能作为辅助示意，不能据此"
+                        "增加产品或个人适配结论。例如，当用户正在比较色彩方向、且参考图能帮助"
+                        "理解冷暖或肤色分类时，图片通常有实质帮助；纯寒暄、售后进度或图片与"
+                        "问题无关时不应附图。最终仍须结合当前问题和对话自主判断。"
+                        '仅返回 JSON：{"message":"消费者可见回复",'
+                        '"media_knowledge_ids":["需要展示的 knowledge_id"]}；'
+                        "不需要图片时返回空数组。"
                     ),
                 },
                 *history,
@@ -157,7 +201,36 @@ class OpenAICompatibleIntentProvider:
             and sum(message.count(mark) for mark in ("?", "？")) > 1
         ):
             raise ValueError("LLM ASK response must contain at most one question")
-        return message
+        if suggested_replies and not all(choice in message for choice in suggested_replies):
+            raise ValueError("LLM ASK response must use the allowed suggested replies")
+        if is_direct_recommendation and any(mark in message for mark in ("?", "？")):
+            raise ValueError("LLM recommendation response must not ask a follow-up question")
+        media_knowledge_ids = result.get("media_knowledge_ids")
+        if not isinstance(media_knowledge_ids, list) or not all(
+            isinstance(item, str) for item in media_knowledge_ids
+        ):
+            raise ValueError("LLM media selection is invalid")
+        available_media_ids = {ref.knowledge_id for ref in card.knowledge_refs if ref.image_url}
+        if not set(media_knowledge_ids).issubset(available_media_ids):
+            raise ValueError("LLM selected unavailable evidence media")
+        return ConsumerReplyGeneration(
+            message=message,
+            media_knowledge_ids=list(dict.fromkeys(media_knowledge_ids)),
+        )
+
+    @staticmethod
+    def _suggested_replies(card: EmpathyCard) -> list[str]:
+        mappings = (
+            ("搓泥发生步骤或已经尝试过的方法", ["护肤后", "防晒后", "上粉底时", "暂时不清楚"]),
+            ("肤色冷暖调或期望妆效", ["偏冷调", "偏暖调", "中性调", "暂时不清楚"]),
+            ("希望了解的产品品类", ["精华类", "水乳/面霜类", "面膜类", "唇妆类", "暂时不确定"]),
+            ("期望的唇妆妆效", ["柔雾轻薄", "水光妆效", "暂时不确定"]),
+            ("期望的口红风格", ["日常柔和", "浓郁有氛围", "暂时不确定"]),
+        )
+        for missing_item, choices in mappings:
+            if missing_item in card.missing_information:
+                return choices
+        return []
 
     def _completion(self, payload: dict[str, Any]) -> dict[str, Any]:
         request = Request(

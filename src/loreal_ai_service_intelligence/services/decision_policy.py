@@ -8,6 +8,7 @@ from loreal_ai_service_intelligence.domain.models import (
     ConversationState,
     EmpathyCard,
     Intent,
+    KnowledgeReference,
     ProductContext,
     RiskLevel,
     StoredConversation,
@@ -165,6 +166,16 @@ class DeterministicDecisionPolicy:
             intent = Intent.USAGE
             intent_confidence = 1.0
             intent_source = "pilling_clarification_rules"
+        elif self._needs_lip_style_details(text, existing):
+            state = ConversationState.ASK
+            risk = RiskLevel.LOW
+            missing = ["期望的口红风格"]
+            # ASK 仍可携带已检索知识，供 response provider 自主判断是否展示辅助图片；
+            # 是否出图不在规则层按关键词决定。
+            refs = self.knowledge.search(text, Intent.PURCHASE)
+            intent = Intent.PURCHASE
+            intent_confidence = 1.0
+            intent_source = "lip_style_clarification_rules"
         elif self._needs_shade_details(text, existing):
             state = ConversationState.ASK
             risk = RiskLevel.LOW
@@ -197,10 +208,26 @@ class DeterministicDecisionPolicy:
                 refs = self.knowledge.search(
                     f"{existing.empathy_card.surface_issue} {text}", Intent.PURCHASE
                 )
+            if (
+                not refs
+                and existing
+                and "希望了解的产品品类" in existing.empathy_card.missing_information
+            ):
+                refs = self.knowledge.search(
+                    f"{existing.empathy_card.surface_issue} {text}", Intent.PURCHASE
+                )
             missing = []
             risk = RiskLevel.LOW
             if refs and self._is_pilling_context(text, existing):
                 state = ConversationState.GUIDE
+            elif refs and self._needs_recommendation_category(text, existing, refs):
+                state = ConversationState.ASK
+                missing = ["希望了解的产品品类"]
+                intent_source = "recommendation_category_clarification_rules"
+            elif refs and self._needs_lip_recommendation_preference(text, existing, refs):
+                state = ConversationState.ASK
+                missing = ["期望的唇妆妆效"]
+                intent_source = "lip_recommendation_preference_rules"
             elif refs:
                 state = ConversationState.RESOLVE
             elif self._needs_product_identity(text, request, existing):
@@ -274,6 +301,15 @@ class DeterministicDecisionPolicy:
 
     @staticmethod
     def _needs_shade_details(text: str, existing: StoredConversation | None) -> bool:
+        history = existing.empathy_card.surface_issue if existing else ""
+        if any(term in f"{history} {text}" for term in ("搓泥", "起屑", "结块")):
+            return False
+        if existing and "希望了解的产品品类" in existing.empathy_card.missing_information:
+            return False
+        if existing and "期望的唇妆妆效" in existing.empathy_card.missing_information:
+            return False
+        if existing and "期望的口红风格" in existing.empathy_card.missing_information:
+            return False
         shade_context = "色号" in text or bool(
             existing and existing.empathy_card.intent == Intent.PURCHASE
         )
@@ -293,6 +329,18 @@ class DeterministicDecisionPolicy:
         return not any(term in text for term in informative) or any(
             term in text for term in ("不知道", "不清楚", "不会判断")
         )
+
+    @staticmethod
+    def _needs_lip_style_details(text: str, existing: StoredConversation | None) -> bool:
+        if existing is not None:
+            return False
+        is_lip_comparison = any(term in text for term in ("口红", "唇膏", "唇釉")) and any(
+            term in text for term in ("还是", "和", "对比", "二选一", "选")
+        )
+        if not is_lip_comparison:
+            return False
+        style_terms = ("日常", "柔和", "低调", "通勤", "浓郁", "氛围", "秋冬", "显眼")
+        return not any(term in text for term in style_terms)
 
     @staticmethod
     def _needs_product_identity(
@@ -345,6 +393,44 @@ class DeterministicDecisionPolicy:
             and existing.empathy_card.risk_level == RiskLevel.LOW
             and existing.empathy_card.intent in {Intent.CONSULT, Intent.PURCHASE, Intent.USAGE}
         )
+
+    @staticmethod
+    def _needs_recommendation_category(
+        text: str,
+        existing: StoredConversation | None,
+        refs: list[KnowledgeReference],
+    ) -> bool:
+        if existing is not None or not any(
+            ref.knowledge_id == "KB-LOREAL-CN-HOT-001" for ref in refs
+        ):
+            return False
+        category_terms = (
+            "护肤",
+            "面霜",
+            "水乳",
+            "精华",
+            "面膜",
+            "底妆",
+            "粉底",
+            "唇妆",
+            "口红",
+            "美发",
+        )
+        return not any(term in text for term in category_terms)
+
+    @staticmethod
+    def _needs_lip_recommendation_preference(
+        text: str,
+        existing: StoredConversation | None,
+        refs: list[KnowledgeReference],
+    ) -> bool:
+        """没有可核验的匹配条件时不随意指定某支唇妆产品。"""
+        if not any(ref.knowledge_id == "KB-LOREAL-CN-LIP-001" for ref in refs):
+            return False
+        history = " ".join(existing.messages) if existing else ""
+        context = f"{history} {text}"
+        supported_dimensions = ("雾面", "柔雾", "轻薄", "水光", "光泽")
+        return not any(term in context for term in supported_dimensions)
 
     @staticmethod
     def _scenario(intent: Intent) -> str:

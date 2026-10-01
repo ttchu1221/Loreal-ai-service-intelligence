@@ -2,6 +2,7 @@ from fastapi.testclient import TestClient
 from pymongo.errors import ConnectionFailure
 
 from loreal_ai_service_intelligence.api.application import create_app
+from loreal_ai_service_intelligence.domain.models import ConsumerReplyGeneration
 from loreal_ai_service_intelligence.infrastructure.repository import MemoryRepository
 
 
@@ -21,6 +22,33 @@ class FailingResponseProvider:
     def generate(self, request, card, existing):
         del request, card, existing
         raise TimeoutError("model timeout")
+
+
+class MisalignedChoiceResponseProvider:
+    def generate(self, request, card, existing):
+        del request, card, existing
+        return "请选择 A、B、C 或 D。"
+
+
+class MediaAwareResponseProvider:
+    def generate(self, request, card, existing):
+        del card, existing
+        return ConsumerReplyGeneration(
+            message="可以结合这张选色方向图理解，再在自然光下试色。",
+            media_knowledge_ids=["KB-SHADE-001"] if "日常柔和" in request.message else [],
+        )
+
+
+class ClarificationMediaResponseProvider:
+    def generate(self, request, card, existing):
+        del request, card, existing
+        return ConsumerReplyGeneration(
+            message=(
+                "可以先结合这张选色方向图理解。你更想要哪种效果？"
+                "请选择：日常柔和、浓郁有氛围，或暂时不确定。"
+            ),
+            media_knowledge_ids=["KB-SHADE-001"],
+        )
 
 
 def test_low_risk_usage_question_resolves_with_traceable_evidence(tmp_path) -> None:
@@ -162,7 +190,7 @@ def test_greeting_with_real_question_still_uses_normal_routing(tmp_path) -> None
     assert response.json()["evidence"][0]["knowledge_id"] == "KB-USAGE-001"
 
 
-def test_product_specific_question_answers_safely_when_identity_is_unavailable(tmp_path) -> None:
+def test_lipstick_comparison_asks_for_one_decision_dimension_then_recommends(tmp_path) -> None:
     client = make_client(tmp_path)
 
     first = client.post(
@@ -172,18 +200,97 @@ def test_product_specific_question_answers_safely_when_identity_is_unavailable(t
 
     assert first["state"] == "ASK"
     assert first["event_id"] is None
-    assert "产品完整名称" in first["message"]
-    assert "不清楚" in first["message"]
+    assert first["suggested_replies"] == ["日常柔和", "浓郁有氛围", "暂时不确定"]
+    assert "黄二白" in first["message"]
+    assert "#01 赤茶红" in first["message"]
+    assert "#05 枫叶红" in first["message"]
+    assert "具体 SKU" in first["message"]
 
     second = client.post(
         f"/v1/conversations/{first['conversation_id']}/messages",
-        json={"message": "我也不清楚具体系列"},
+        json={"message": "日常柔和"},
     ).json()
 
     assert second["state"] == "RESOLVE"
     assert second["event_id"] is None
-    assert "无法确认" in second["message"]
-    assert "不会只根据色号名称" in second["message"]
+    assert second["suggested_replies"] == []
+    assert "#01 赤茶红" in second["message"]
+    assert "日常柔和" in second["message"]
+    assert "一定显白" not in second["message"]
+    assert second["evidence"][0]["image_url"] is None
+
+
+def test_response_provider_can_choose_retrieved_image_without_always_showing_it(tmp_path) -> None:
+    del tmp_path
+    client = TestClient(
+        create_app(MemoryRepository(), response_provider=MediaAwareResponseProvider())
+    )
+    first = client.post(
+        "/v1/conversations",
+        json={"message": "我黄二白，口红选#01赤茶红还是#05枫叶红呀"},
+    ).json()
+
+    assert first["state"] == "ASK"
+    assert first["evidence"] == []
+
+    second = client.post(
+        f"/v1/conversations/{first['conversation_id']}/messages",
+        json={"message": "日常柔和"},
+    ).json()
+
+    assert second["state"] == "RESOLVE"
+    assert second["evidence"][0]["knowledge_id"] == "KB-SHADE-001"
+    assert second["evidence"][0]["image_url"] == "/v1/knowledge/KB-SHADE-001/media"
+
+
+def test_response_provider_can_choose_retrieved_image_during_clarification(tmp_path) -> None:
+    del tmp_path
+    client = TestClient(
+        create_app(MemoryRepository(), response_provider=ClarificationMediaResponseProvider())
+    )
+
+    body = client.post(
+        "/v1/conversations",
+        json={"message": "我黄二白，口红选#01赤茶红还是#05枫叶红呀"},
+    ).json()
+
+    assert body["state"] == "ASK"
+    assert body["evidence"][0]["knowledge_id"] == "KB-SHADE-001"
+    assert body["evidence"][0]["image_url"] == "/v1/knowledge/KB-SHADE-001/media"
+
+
+def test_lipstick_comparison_keeps_copy_aligned_with_quick_replies(tmp_path) -> None:
+    del tmp_path
+    client = TestClient(
+        create_app(MemoryRepository(), response_provider=MisalignedChoiceResponseProvider())
+    )
+
+    body = client.post(
+        "/v1/conversations",
+        json={"message": "我黄二白，口红选#01赤茶红还是#05枫叶红呀"},
+    ).json()
+
+    assert body["suggested_replies"] == ["日常柔和", "浓郁有氛围", "暂时不确定"]
+    assert "日常柔和、浓郁有氛围，或暂时不确定" in body["message"]
+    assert "A、B、C 或 D" not in body["message"]
+
+
+def test_lipstick_comparison_can_recommend_the_atmospheric_direction(tmp_path) -> None:
+    client = make_client(tmp_path)
+    first = client.post(
+        "/v1/conversations",
+        json={"message": "我黄二白，口红选#01赤茶红还是#05枫叶红呀"},
+    ).json()
+
+    second = client.post(
+        f"/v1/conversations/{first['conversation_id']}/messages",
+        json={"message": "浓郁有氛围"},
+    ).json()
+
+    assert second["state"] == "RESOLVE"
+    assert "#05 枫叶红" in second["message"]
+    assert "浓郁氛围" in second["message"]
+    assert "一定显白" in second["message"]
 
 
 def test_unknown_lipstick_texture_gets_generic_guidance_without_product_claim(tmp_path) -> None:
@@ -213,6 +320,86 @@ def test_known_generic_knowledge_does_not_require_product_identity(tmp_path) -> 
 
     assert body["state"] == "RESOLVE"
     assert body["event_id"] is None
+
+
+def test_official_china_hot_searches_can_support_a_careful_product_shortlist(tmp_path) -> None:
+    client = make_client(tmp_path)
+
+    first = client.post(
+        "/v1/conversations", json={"message": "欧莱雅有什么热门产品可以推荐？"}
+    ).json()
+
+    assert first["state"] == "ASK"
+    assert first["suggested_replies"] == [
+        "精华类",
+        "水乳/面霜类",
+        "面膜类",
+        "唇妆类",
+        "暂时不确定",
+    ]
+
+    body = client.post(
+        f"/v1/conversations/{first['conversation_id']}/messages",
+        json={"message": "精华类"},
+    ).json()
+    assert body["state"] == "RESOLVE"
+    assert body["event_id"] is None
+    assert body["evidence"][0]["knowledge_id"] == "KB-LOREAL-CN-HOT-SERUM-001"
+    assert "黑精华第四代" in body["message"]
+    assert "小蜜罐" not in body["message"]
+    assert "销量排名" in body["message"]
+    assert "https://www.lorealparis.com.cn/" in body["evidence"][0]["source"]
+
+
+def test_official_china_lip_page_supports_a_limited_lip_shortlist(tmp_path) -> None:
+    client = make_client(tmp_path)
+
+    body = client.post("/v1/conversations", json={"message": "推荐一支欧莱雅热门口红"}).json()
+
+    assert body["state"] == "ASK"
+    assert body["event_id"] is None
+    assert body["evidence"] == []
+    assert body["suggested_replies"] == ["柔雾轻薄", "水光妆效", "暂时不确定"]
+
+
+def test_lip_recommendation_matches_the_users_stated_finish(tmp_path) -> None:
+    client = make_client(tmp_path)
+
+    body = client.post(
+        "/v1/conversations", json={"message": "我想要水光妆效，推荐一支欧莱雅口红"}
+    ).json()
+
+    assert body["state"] == "RESOLVE"
+    assert body["evidence"][0]["knowledge_id"] == "KB-LOREAL-CN-LIP-001"
+    assert "印迹唇釉 129（水光）" in body["message"]
+    assert "柔雾小钢笔" not in body["message"]
+
+
+def test_lip_recommendation_uses_preference_from_previous_turn(tmp_path) -> None:
+    client = make_client(tmp_path)
+    first = client.post("/v1/conversations", json={"message": "推荐一支欧莱雅口红"}).json()
+
+    body = client.post(
+        f"/v1/conversations/{first['conversation_id']}/messages",
+        json={"message": "柔雾轻薄"},
+    ).json()
+
+    assert body["state"] == "RESOLVE"
+    assert "柔雾小钢笔 129" in body["message"]
+    assert "水光妆效" not in body["message"]
+
+
+def test_lip_category_can_be_selected_from_general_recommendations(tmp_path) -> None:
+    client = make_client(tmp_path)
+
+    first = client.post("/v1/conversations", json={"message": "欧莱雅有什么产品可以推荐？"}).json()
+    body = client.post(
+        f"/v1/conversations/{first['conversation_id']}/messages",
+        json={"message": "唇妆类"},
+    ).json()
+
+    assert body["state"] == "ASK"
+    assert body["suggested_replies"] == ["柔雾轻薄", "水光妆效", "暂时不确定"]
 
 
 def test_other_evidence_free_intents_reply_without_creating_ticket(tmp_path) -> None:

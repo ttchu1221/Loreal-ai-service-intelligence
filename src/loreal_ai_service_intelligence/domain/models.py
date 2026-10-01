@@ -73,6 +73,9 @@ class KnowledgeItem(BaseModel):
     region: Optional[str] = None
     review_status: Literal["approved", "rejected", "pending"] = "approved"
     keywords: tuple[str, ...] = ()
+    image_url: Optional[str] = None
+    image_alt: Optional[str] = None
+    media_review_status: Optional[Literal["approved", "pending"]] = None
 
 
 class KnowledgeReference(BaseModel):
@@ -80,6 +83,16 @@ class KnowledgeReference(BaseModel):
     version: str
     excerpt: str
     source: str
+    image_url: Optional[str] = None
+    image_alt: Optional[str] = None
+    media_review_status: Optional[Literal["approved", "pending"]] = None
+
+
+class ConsumerReplyGeneration(BaseModel):
+    """模型生成的话术及其自主选择的已检索图片依据。"""
+
+    message: str = Field(min_length=1, max_length=1200)
+    media_knowledge_ids: list[str] = Field(default_factory=list, max_length=3)
 
 
 class Inference(BaseModel):
@@ -135,6 +148,7 @@ class ConsumerResponse(BaseModel):
     message: str
     evidence: list[KnowledgeReference] = Field(default_factory=list)
     available_actions: list[str] = Field(default_factory=list)
+    suggested_replies: list[str] = Field(default_factory=list, max_length=5)
     event_id: Optional[str] = None
     event_status: Optional[str] = None
     estimated_response_at: Optional[datetime] = None

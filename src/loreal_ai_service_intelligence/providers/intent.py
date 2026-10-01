@@ -17,7 +17,7 @@ class RuleBasedIntentProvider:
             return IntentResult(intent=Intent.AFTER_SALES, confidence=0.9, source="rules")
         if any(term in text for term in ("投诉", "骗人", "假货", "服务态度")):
             return IntentResult(intent=Intent.COMPLAINT, confidence=0.9, source="rules")
-        if any(term in text for term in ("购买", "色号", "粉底", "试色", "适合买吗")):
+        if any(term in text for term in ("购买", "推荐", "色号", "粉底", "试色", "适合买吗")):
             return IntentResult(intent=Intent.PURCHASE, confidence=0.85, source="rules")
         if any(term in text for term in ("使用", "怎么用", "第一次", "首次", "用法")):
             return IntentResult(intent=Intent.USAGE, confidence=0.9, source="rules")

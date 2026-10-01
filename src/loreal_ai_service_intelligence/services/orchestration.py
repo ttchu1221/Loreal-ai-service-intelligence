@@ -16,6 +16,7 @@ from loreal_ai_service_intelligence.domain.models import (
     CaseRecord,
     CaseRevision,
     CaseRevisionRequest,
+    ConsumerReplyGeneration,
     ConsumerResponse,
     ConsumerTicketView,
     ConversationRequest,
@@ -25,6 +26,7 @@ from loreal_ai_service_intelligence.domain.models import (
     EventSummary,
     HandoffPackage,
     Intent,
+    KnowledgeReference,
     RiskLevel,
     RiskStatus,
     RiskTracking,
@@ -242,6 +244,7 @@ class ConversationOrchestrator:
         result_id = f"result_{uuid4().hex}"
         fallback_text, actions = self._consumer_copy(card)
         response_text = fallback_text
+        selected_media_ids: set[str] = set()
         if (
             self.response_provider is not None
             and card.next_state
@@ -250,10 +253,19 @@ class ConversationOrchestrator:
                 ConversationState.GUIDE,
                 ConversationState.RESOLVE,
             }
-            and card.intent_source != "user_decline_handoff_rules"
+            and card.intent_source
+            not in {
+                "user_decline_handoff_rules",
+                "lip_recommendation_preference_rules",
+            }
         ):
             try:
-                response_text = self.response_provider.generate(request, card, existing)
+                generated = self.response_provider.generate(request, card, existing)
+                if isinstance(generated, ConsumerReplyGeneration):
+                    response_text = generated.message
+                    selected_media_ids = set(generated.media_knowledge_ids)
+                elif card.intent_source != "lip_style_clarification_rules":
+                    response_text = generated
             except Exception as error:  # provider 失败不得中断消费者主链路
                 self.repository.add_audit(
                     conversation_id,
@@ -303,16 +315,52 @@ class ConversationOrchestrator:
             result_id=result_id,
             state=card.next_state,
             message=response_text,
-            evidence=(
-                card.knowledge_refs
-                if card.next_state in {ConversationState.RESOLVE, ConversationState.GUIDE}
-                else []
-            ),
+            evidence=self._consumer_evidence(card, selected_media_ids),
             available_actions=actions,
+            suggested_replies=self._suggested_replies(card),
             event_id=event.event_id if event else None,
             event_status=event.status if event else None,
             estimated_response_at=event.estimated_response_at if event else None,
         )
+
+    @staticmethod
+    def _consumer_evidence(
+        card: EmpathyCard, selected_media_ids: set[str]
+    ) -> list[KnowledgeReference]:
+        if card.next_state not in {
+            ConversationState.ASK,
+            ConversationState.RESOLVE,
+            ConversationState.GUIDE,
+        }:
+            return []
+        if card.next_state == ConversationState.ASK and not selected_media_ids:
+            return []
+        return [
+            ref
+            if ref.knowledge_id in selected_media_ids
+            else ref.model_copy(
+                update={"image_url": None, "image_alt": None, "media_review_status": None}
+            )
+            for ref in card.knowledge_refs
+        ]
+
+    @staticmethod
+    def _suggested_replies(card: EmpathyCard) -> list[str]:
+        if card.next_state != ConversationState.ASK:
+            return []
+        if "搓泥发生步骤或已经尝试过的方法" in card.missing_information:
+            return ["护肤后", "防晒后", "上粉底时", "暂时不清楚"]
+        if "肤色冷暖调或期望妆效" in card.missing_information:
+            return ["偏冷调", "偏暖调", "中性调", "暂时不清楚"]
+        if "希望了解的产品品类" in card.missing_information:
+            return ["精华类", "水乳/面霜类", "面膜类", "唇妆类", "暂时不确定"]
+        if "期望的唇妆妆效" in card.missing_information:
+            return ["柔雾轻薄", "水光妆效", "暂时不确定"]
+        if "期望的口红风格" in card.missing_information:
+            return ["日常柔和", "浓郁有氛围", "暂时不确定"]
+        if any("产品完整名称" in item for item in card.missing_information):
+            return ["暂时不清楚"]
+        return []
 
     @staticmethod
     def _consumer_copy(card: EmpathyCard) -> tuple[str, list[str]]:
@@ -361,7 +409,7 @@ class ConversationOrchestrator:
                 return "好的，暂不转人工。请继续描述你希望 AI 帮你解决的具体问题。", ["reply"]
             if "搓泥发生步骤或已经尝试过的方法" in card.missing_information:
                 return (
-                    "为了只调整一个条件，请告诉我搓泥发生在哪一步，以及你已经试过什么方法；不确定也可以跳过。",
+                    "搓泥更接近发生在哪一步？请选择：护肤后、防晒后、上粉底时，或暂时不清楚。",
                     [
                         "reply",
                         "skip",
@@ -374,7 +422,29 @@ class ConversationOrchestrator:
                     "如果手边没有这些信息，也可以直接说“不清楚”，我会按现有信息继续处理。",
                     ["reply", "skip", "confirm_handoff"],
                 )
-            return "为了更准确地给出建议，请告诉我你的肤色冷暖调，或你偏好的妆效。", ["reply"]
+            if "希望了解的产品品类" in card.missing_information:
+                return (
+                    "你更想先了解哪一类？请选择：精华类、水乳/面霜类、面膜类、唇妆类或暂时不确定。",
+                    ["reply"],
+                )
+            if "期望的唇妆妆效" in card.missing_information:
+                return (
+                    "为了按你的需求推荐，你更想要哪种妆效？请选择：柔雾轻薄、水光妆效，"
+                    "或暂时不确定。",
+                    ["reply"],
+                )
+            if "期望的口红风格" in card.missing_information:
+                return (
+                    "按你自述的黄二白，如果只在这两个色彩方向里先选，我会更建议先试 #01 赤茶红："
+                    "茶红方向通常更日常柔和；想要更浓郁、偏秋冬氛围时，再优先试 #05 枫叶红。"
+                    "目前没有对应系列的官方商品页，所以这是按名称给出的试色建议，不是具体 SKU "
+                    "一定显白的保证。你更想要哪种效果？请选择：日常柔和、浓郁有氛围，"
+                    "或暂时不确定。",
+                    ["reply"],
+                )
+            return "你的肤色底调更接近哪一种？请选择：偏冷调、偏暖调、中性调，或暂时不清楚。", [
+                "reply"
+            ]
         if card.next_state == ConversationState.HANDOFF:
             if card.intent_source == "user_handoff_rules":
                 return "已按你的选择转接人工客服，之前的沟通内容会一并同步。", ["view_ticket"]
@@ -398,6 +468,38 @@ class ConversationOrchestrator:
         }
         label = labels.get(card.intent, "服务指引")
         evidence_text = " ".join(ref.excerpt for ref in card.knowledge_refs)
+        recommendation_context = " ".join(card.confirmed_facts)
+        if all(term in recommendation_context for term in ("赤茶红", "枫叶红")):
+            if any(term in recommendation_context for term in ("日常", "柔和", "低调", "通勤")):
+                return (
+                    "结合你黄二白、想要日常柔和的需求，我会先试偏暖、低饱和的茶红方向；"
+                    "在这两个名称里可优先试 #01 赤茶红。由于目前没有对应系列的官方商品页，"
+                    "这只是按色彩方向给出的试色顺序，不代表已确认该色号的实际上唇效果；"
+                    "下单前建议在自然光下试色。",
+                    ["feedback", "new_question"],
+                )
+            if any(term in recommendation_context for term in ("浓郁", "氛围", "秋冬", "显眼")):
+                return (
+                    "结合你黄二白、想要浓郁氛围感的需求，我会先试更偏秋冬氛围的枫叶红方向；"
+                    "在这两个名称里可优先试 #05 枫叶红。由于目前没有对应系列的官方商品页，"
+                    "这只是按色彩方向给出的试色顺序，不代表已确认该色号一定显白；"
+                    "下单前建议在自然光下试色。",
+                    ["feedback", "new_question"],
+                )
+        if any(ref.knowledge_id == "KB-LOREAL-CN-LIP-001" for ref in card.knowledge_refs):
+            if any(term in recommendation_context for term in ("雾面", "柔雾", "轻薄")):
+                return (
+                    "按你想要的柔雾轻薄妆效，更匹配的候选是印迹唇釉-柔雾小钢笔 129；"
+                    "中国官网将这款描述为雾感、轻薄。实际色彩和使用感受仍以商品页与实物试色为准。",
+                    ["feedback", "new_question"],
+                )
+            if any(term in recommendation_context for term in ("水光", "光泽")):
+                return (
+                    "按你想要的水光妆效，更匹配的候选是欧莱雅印迹唇釉 129（水光）；"
+                    "推荐依据是中国官网展示的款式名称与水光妆效标识，实际色彩和使用感受仍以"
+                    "商品页与实物试色为准。",
+                    ["feedback", "new_question"],
+                )
         return f"根据已审核的{label}：{evidence_text}", [
             "feedback",
             "new_question",

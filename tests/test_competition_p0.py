@@ -645,7 +645,7 @@ def test_competition_llm_generates_draft_without_changing_fixed_decision() -> No
     assert session["decision"]["send_allowed"] is True
     system_prompt = observed["payload"]["messages"][0]["content"]
     assert "直接结论 → 简短依据 → 一个下一步建议" in system_prompt
-    assert "不得使用“亲亲”" in system_prompt
+    assert "不使用“亲”" in system_prompt
     assert "未确认时明确说“需要核实”" in system_prompt
     context = json.loads(observed["payload"]["messages"][-1]["content"])
     assert context["fixed_decision"]["service_mode"] == "AUTO_REPLY"

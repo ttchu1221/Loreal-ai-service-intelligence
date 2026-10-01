@@ -1,10 +1,11 @@
 # ruff: noqa: E501  # 内嵌 workspace HTML/CSS 保持可直接交付的单文件模板。
 from __future__ import annotations
 
+from importlib.resources import files
 from typing import Literal, Optional, Union
 
 from fastapi import FastAPI, HTTPException, Query, Request, status
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from pymongo.errors import PyMongoError
 
 from loreal_ai_service_intelligence import __version__
@@ -129,6 +130,18 @@ def create_app(
     @application.get("/health", tags=["system"])
     def health_check() -> dict[str, str]:
         return {"status": "ok", "environment": settings.app_env}
+
+    @application.get("/v1/knowledge/KB-SHADE-001/media", tags=["knowledge"])
+    def shade_knowledge_media() -> FileResponse:
+        """返回用户提供、等待正式素材替换的色号参考图。"""
+        media_path = files("loreal_ai_service_intelligence.providers").joinpath(
+            "data/kb-shade-001-reference.jpg"
+        )
+        return FileResponse(
+            media_path,
+            media_type="image/jpeg",
+            headers={"Cache-Control": "public, max-age=3600"},
+        )
 
     @application.post(
         "/v1/conversations",
@@ -539,6 +552,9 @@ box-shadow:0 7px 22px rgba(66,40,49,.06)}.bubble.user{align-self:flex-end;backgr
 color:#fff;border-bottom-right-radius:5px}.bubble.agent{border-color:#d99aae;background:#fff4f7}.bubble.error{align-self:flex-start;background:#fff4f4;color:#8a2330;
 border:1px solid #efc7cc}.bubble.system{align-self:flex-start;background:#f7f3f4;color:#69585e;
 border:1px dashed #cfbcc2}.bubble small{display:block;margin-top:8px;opacity:.58;font-size:11px}
+.evidence-media{display:block;margin-top:12px;color:inherit;text-decoration:none}.evidence-media img{display:block;
+width:min(240px,100%);max-height:300px;object-fit:cover;object-position:center;border-radius:12px;border:1px solid var(--line)}
+.evidence-media span{display:block;margin-top:7px;color:var(--muted);font-size:11px;line-height:1.45}
 .composer{flex:0 0 auto;padding:18px 24px 22px;border-top:1px solid var(--line);background:#fff}.input-wrap{display:flex;align-items:flex-end;
 gap:10px;background:#f6f1ef;border:1px solid transparent;border-radius:20px;padding:7px 8px 7px 16px}
 .input-wrap:focus-within{border-color:#cf9dad;background:#fff}textarea{flex:1;resize:none;border:0;background:transparent;
@@ -546,6 +562,7 @@ padding:8px 0;min-height:44px;max-height:120px;outline:0}.send{width:46px;height
 background:var(--rose);color:#fff;font-size:20px}.send:hover{transform:translateY(-2px);box-shadow:0 7px 18px #d9a0b2}
 .quick{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}.chip{padding:7px 12px;border-radius:99px;
 background:#fff;border:1px solid var(--line);color:#5f5055;font-size:12px}.chip:hover{border-color:var(--rose);color:var(--rose)}
+.suggestions:empty{display:none}.suggestions .chip{background:#f8ecef;border-color:#e7cbd3;color:#7e304b}
 .side{padding:28px 24px;background:#201a1c;color:#fff;display:flex;flex-direction:column;gap:22px}.eyebrow{
 font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:#d6a9b7}.side h2{font:500 24px/1.2 Georgia,
 "Songti SC",serif}.progress{position:relative;padding-left:20px}.progress:before{content:"";position:absolute;left:4px;
@@ -569,8 +586,9 @@ flex-direction:column;overflow:visible}.chat{height:100vh;min-height:560px;flex:
 <div id="messages" class="messages" aria-live="polite"><div class="bubble ai">你好，我是你的智慧美妆顾问。
 可以告诉我遇到的问题，我会逐步帮你排查。<small>AI 顾问 · 刚刚</small></div></div>
 <div id="result" hidden>等待开始</div><section class="composer"><div class="input-wrap">
-<textarea id="message" rows="2" aria-label="问题描述" placeholder="描述你的问题，或输入“转人工”……">我的底妆总是搓泥</textarea>
+<textarea id="message" rows="2" aria-label="问题描述" placeholder="描述你的问题，或输入“转人工”……"></textarea>
 <button id="sendButton" class="send" onclick="send()" aria-label="发送消息">↑</button></div>
+<div id="suggestions" class="quick suggestions" aria-label="快捷回复选项"></div>
 <div class="quick"><button id="handoffButton" class="chip" onclick="handoff()" disabled>联系人工客服</button>
 <button id="resolvedButton" class="chip" onclick="feedback(true)" disabled>问题已解决</button>
 <button id="unresolvedButton" class="chip" onclick="feedback(false)" disabled>问题未解决</button></div></section>
@@ -591,6 +609,7 @@ const unresolvedButtonEl=document.getElementById('unresolvedButton');const aiSte
 const agentStepEl=document.getElementById('agentStep');const doneStepEl=document.getElementById('doneStep');
 const ticketPanelEl=document.getElementById('ticketPanel');const confirmButtonEl=document.getElementById('confirmButton');
 const reopenButtonEl=document.getElementById('reopenButton');const clearButtonEl=document.getElementById('clearButton');
+const suggestionsEl=document.getElementById('suggestions');
 let conversationId=localStorage.getItem('lorealConversationId');let resultId=null;
 let pollTimer=null;let lastAgentReply=null;
 const welcomeText='你好，我是你的智慧美妆顾问。\\n可以告诉我遇到的问题，我会逐步帮你排查。';
@@ -601,21 +620,33 @@ function addBubble(text,type='ai'){const bubble=document.createElement('div');bu
 bubble.textContent=text;const meta=document.createElement('small');meta.textContent=
 type==='user'?'你 · 刚刚':type==='agent'?'人工客服 · 刚刚':type==='error'?'发送失败':
 type==='system'?'系统提示':'AI 顾问 · 刚刚';bubble.append(meta);
-messagesList.append(bubble);messagesList.scrollTop=messagesList.scrollHeight;}
+messagesList.append(bubble);messagesList.scrollTop=messagesList.scrollHeight;return bubble;}
+function renderEvidenceMedia(container,evidence=[]){evidence.filter(x=>x.image_url).forEach(item=>{
+const link=document.createElement('a');link.className='evidence-media';link.href=item.image_url;link.target='_blank';
+link.rel='noopener';const image=document.createElement('img');image.src=item.image_url;
+image.alt=item.image_alt||`${item.knowledge_id} 参考图`;image.loading='lazy';
+const caption=document.createElement('span');caption.textContent=item.media_review_status==='pending'?
+`${item.knowledge_id} · 临时参考图（来源待审核，后续可替换）`:`${item.knowledge_id} · 图片依据`;
+link.append(image,caption);container.append(link);});messagesList.scrollTop=messagesList.scrollHeight;}
 function showError(error){const detail=String(error.message||error);const friendly=
 detail==='Failed to fetch'?'网络连接失败，请确认服务正在运行后重试':detail;
 addBubble(`暂时无法完成操作：${friendly}`,'error');}
 function setSending(active){sendButtonEl.disabled=active;sendButtonEl.textContent=active?'…':'↑';
 sendButtonEl.setAttribute('aria-busy',String(active));messageInput.disabled=active;}
+function renderSuggestions(choices=[]){suggestionsEl.replaceChildren();choices.forEach(text=>{
+const button=document.createElement('button');button.type='button';button.className='chip';button.textContent=text;
+button.addEventListener('click',()=>chooseReply(text));suggestionsEl.append(button);});}
+function chooseReply(text){messageInput.value=text;send();}
 function show(b){resultId=b.result_id||resultId;const evidence=b.evidence?.length?
-`\n\n参考依据：${b.evidence.map(x=>x.knowledge_id).join(', ')}`:'';addBubble(
-`${b.message||'操作成功'}${evidence}`);
+`\n\n参考依据：${b.evidence.map(x=>x.knowledge_id).join(', ')}`:'';const bubble=addBubble(
+`${b.message||'操作成功'}${evidence}`);renderEvidenceMedia(bubble,b.evidence||[]);
+renderSuggestions(b.suggested_replies||[]);
 sessionEl.textContent=conversationId?`会话：${conversationId}`:'尚未创建会话';
 handoffButtonEl.disabled=!conversationId;resolvedButtonEl.disabled=!resultId;
 unresolvedButtonEl.disabled=!resultId;
 aiStepEl.classList.add('active');if(b.event_id)startPolling();}
 async function send(){if(sendButtonEl.disabled)return;const text=messageInput.value.trim();if(!text)return;
-messageInput.value='';setSending(true);addBubble(text,'user');try{
+messageInput.value='';renderSuggestions();setSending(true);addBubble(text,'user');try{
 const payload={message:text};
 const path=conversationId?`/v1/conversations/${conversationId}/messages`:'/v1/conversations';
 const b=await call(path,{method:'POST',headers:{'content-type':'application/json'},
@@ -625,18 +656,19 @@ messageInput.placeholder=b.state==='ASK'?'补充 AI 询问的信息，或直接�
 }catch(e){messageInput.value=text;showError(e);}finally{setSending(false);messageInput.focus();}}
 function clearConversation(){if(pollTimer){clearInterval(pollTimer);pollTimer=null;}
 localStorage.removeItem('lorealConversationId');conversationId=null;resultId=null;messagesList.replaceChildren();
-addBubble(welcomeText);sessionEl.textContent='尚未创建会话';messageInput.value='';
+addBubble(welcomeText);renderSuggestions();sessionEl.textContent='尚未创建会话';messageInput.value='';
 messageInput.placeholder='描述你的问题，或输入“转人工”……';handoffButtonEl.disabled=true;
 resolvedButtonEl.disabled=true;unresolvedButtonEl.disabled=true;confirmButtonEl.disabled=true;
 reopenButtonEl.disabled=true;aiStepEl.classList.remove('active');agentStepEl.classList.remove('active');
 doneStepEl.classList.remove('active');ticketPanelEl.textContent='AI 无法可靠回答或你主动选择人工时，\\n这里会同步客服进度和回复。';
 messageInput.focus();}
-function recoverIncompleteConversation(b){const latestUser=[...b.transcript].reverse().find(x=>x.role==='user');
+function recoverIncompleteConversation(b){
 if(pollTimer){clearInterval(pollTimer);pollTimer=null;}localStorage.removeItem('lorealConversationId');
 conversationId=null;resultId=null;messagesList.replaceChildren();addBubble(welcomeText);
-addBubble('检测到旧版会话没有保存 AI 回复，已为你开始新会话。原问题已保留，请重新发送。','system');
-sessionEl.textContent='旧版会话不完整 · 已开始新会话';messageInput.value=latestUser?.content||'';
-messageInput.placeholder='请重新发送原问题……';handoffButtonEl.disabled=true;resolvedButtonEl.disabled=true;
+renderSuggestions();
+addBubble('检测到旧版会话没有保存 AI 回复，已为你开始新会话，请重新描述需要咨询的问题。','system');
+sessionEl.textContent='旧版会话不完整 · 已开始新会话';messageInput.value='';
+messageInput.placeholder='描述你的问题，或输入“转人工”……';handoffButtonEl.disabled=true;resolvedButtonEl.disabled=true;
 unresolvedButtonEl.disabled=true;confirmButtonEl.disabled=true;reopenButtonEl.disabled=true;
 aiStepEl.classList.remove('active');agentStepEl.classList.remove('active');doneStepEl.classList.remove('active');
 ticketPanelEl.textContent='AI 无法可靠回答或你主动选择人工时，\\n这里会同步客服进度和回复。';messageInput.focus();}

@@ -14,6 +14,7 @@ def test_pilling_flow_asks_once_then_returns_single_condition_guide() -> None:
 
     assert first["state"] == "ASK"
     assert "skip" in first["available_actions"]
+    assert first["suggested_replies"] == ["护肤后", "防晒后", "上粉底时", "暂时不清楚"]
     second = client.post(
         f"/v1/conversations/{first['conversation_id']}/messages",
         json={"message": "发生在涂粉底时，我已经试过换粉扑"},
@@ -354,16 +355,29 @@ def test_minimum_workspaces_are_available() -> None:
     assert agent_response.headers["cache-control"] == "no-store"
     assert "L'Oréal 智慧美妆顾问" in consumer
     assert 'aria-label="发送消息"' in consumer
+    assert 'id="suggestions"' in consumer
+    assert "function renderSuggestions(choices=[])" in consumer
+    assert "button.addEventListener('click',()=>chooseReply(text))" in consumer
+    assert "renderSuggestions(b.suggested_replies||[])" in consumer
+    assert "function renderEvidenceMedia(container,evidence=[])" in consumer
+    assert "临时参考图（来源待审核，后续可替换）" in consumer
     assert "setSending(true)" in consumer
     assert "const messagesList=document.getElementById('messages')" in consumer
     assert "messagesList.append(bubble)" in consumer
     assert "messageInput.value=''" in consumer
-    assert "messageInput.value='';setSending(true)" in consumer
+    assert "messageInput.value='';renderSuggestions();setSending(true)" in consumer
     assert "messageInput.value=text;showError(e)" in consumer
     assert 'id="clearButton"' in consumer
     assert 'id="product"' not in consumer
     assert "当前产品" not in consumer
+
+    knowledge_media = client.get("/v1/knowledge/KB-SHADE-001/media")
+    assert knowledge_media.status_code == 200
+    assert knowledge_media.headers["content-type"] == "image/jpeg"
+    assert knowledge_media.content.startswith(b"\xff\xd8\xff")
     assert "演示粉底" not in consumer
+    assert "我的底妆总是搓泥" not in consumer
+    assert 'placeholder="描述你的问题，或输入“转人工”……"></textarea>' in consumer
     assert "const payload={message:text};" in consumer
     assert "function clearConversation()" in consumer
     assert "localStorage.removeItem('lorealConversationId')" in consumer
@@ -380,7 +394,8 @@ def test_minimum_workspaces_are_available() -> None:
     assert "b.transcript.some(x=>x.role==='user')&&!hasReply" in consumer
     assert "旧版会话没有保存 AI 回复" in consumer
     assert "type==='system'?'系统提示'" in consumer
-    assert "messageInput.value=latestUser?.content||''" in consumer
+    assert "latestUser" not in consumer
+    assert "messageInput.value=latestUser?.content||''" not in consumer
     assert "if(['HANDOFF','BLOCK'].includes(b.state))startPolling()" in consumer
     assert "历史会话已失效，请重新开始咨询" in consumer
     assert "转人工" in consumer

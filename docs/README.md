@@ -33,6 +33,8 @@
   runtime integration 和 production 接入限制。
 - [客服回复话术规范](customer-service-voice.md)：从脱敏历史聊天中归纳的回复结构、品牌语气、禁用
   表达和 agent prompt 接入边界。
+- [外部产品信息与推荐边界](external-product-evidence.md)：联网核验来源、市场范围、热门候选和禁止
+  推导的商品结论。
 
 当前可运行的是本地 P0 主链路、deterministic Mock 与可选 LLM intent/上下文回复 adapter。真实 RAG、外部售后、
 认证授权、通知送达和 production 验收尚未完成，不能因 contract 或 Mock 存在而标记为已集成。
