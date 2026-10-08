@@ -270,6 +270,21 @@ class AgentAssistantBrief(BaseModel):
     ] = None
 
 
+class AgentEmpathyCard(BaseModel):
+    """客服工作台统一展示的九字段共情卡。"""
+
+    current_request: str
+    consumer_quote: str
+    emotion: str
+    known_information: list[str] = Field(default_factory=list)
+    missing_information: list[str] = Field(default_factory=list)
+    historical_promises: list[str] = Field(default_factory=list)
+    unresolved_items: list[str] = Field(default_factory=list)
+    risk_level: RiskLevel
+    risk_reasons: list[str] = Field(default_factory=list)
+    recommended_actions: list[str] = Field(default_factory=list)
+
+
 class ConsumerConversationView(BaseModel):
     conversation_id: str
     state: ConversationState
@@ -423,6 +438,7 @@ class HandoffPackage(BaseModel):
 class AgentConversationView(BaseModel):
     handoff_package: HandoffPackage
     empathy_card: EmpathyCard
+    agent_empathy_card: AgentEmpathyCard
     audit_trail: list[dict[str, Any]]
     assistant_brief: Optional[AgentAssistantBrief] = None
     risk_tracking: Optional[RiskTracking] = None

@@ -244,6 +244,7 @@ def test_agent_intake_aggregates_context_and_returns_assistant_brief() -> None:
     body = response.json()
     assert body["event"]["status"] == "processing"
     brief = body["conversation"]["assistant_brief"]
+    empathy = body["conversation"]["agent_empathy_card"]
     assert brief["emotion"] == "anxious"
     assert brief["escalation_target"] == "logistics"
     assert {item["source"] for item in brief["service_timeline"]} == {
@@ -253,6 +254,18 @@ def test_agent_intake_aggregates_context_and_returns_assistant_brief() -> None:
     }
     assert "核对关联订单状态" in brief["next_actions"]
     assert brief["reply_draft"]
+    assert empathy == {
+        "current_request": "订单还没收到，我很着急，帮我查一下物流",
+        "consumer_quote": "订单还没收到，我很着急，帮我查一下物流",
+        "emotion": "anxious",
+        "known_information": brief["known_facts"],
+        "missing_information": brief["unknown_fields"],
+        "historical_promises": brief["historical_promises"],
+        "unresolved_items": brief["unresolved_items"],
+        "risk_level": brief["risk_level"],
+        "risk_reasons": brief["risk_reasons"],
+        "recommended_actions": brief["next_actions"],
+    }
     assert (
         client.get("/v1/agent/events").json()[0]["conversation_id"]
         == body["event"]["conversation_id"]
@@ -388,6 +401,22 @@ def test_minimum_workspaces_are_available() -> None:
     assert "touch-action:pan-y" in consumer
     assert "animation:rise .24s ease-out;flex:0 0 auto" in consumer
     assert "flex:0 0 auto;padding:18px 24px" in consumer
+    assert "① 服务轨迹" in agent
+    assert "② 共情理解" in agent
+    assert "③ AI 建议" in agent
+    assert "④ 风险跟踪" in agent
+    assert "当前诉求：${empathy.current_request}" in agent
+    assert "历史承诺：${empathy.historical_promises.join('；')||'暂无'}" in agent
+    assert "未完成事项：${empathy.unresolved_items.join('；')||'暂无'}" in agent
+    assert 'id="adoptSuggestion"' in agent
+    assert 'id="editSuggestion"' in agent
+    assert 'id="rejectSuggestion"' in agent
+    assert "function suggestionFeedback(decision)" in agent
+    assert "function enumLabel(value)" in agent
+    assert "当前情绪：${enumLabel(empathy.emotion)}" in agent
+    assert "紧迫度：${brief?enumLabel(brief.urgency):'待判断'}" in agent
+    assert "风险等级：${enumLabel(empathy.risk_level)}" in agent
+    assert "状态：${enumLabel(p.current_state)}" in agent
     assert "message.value='发生在涂粉底后" not in consumer
     assert "restoreConversation()" in consumer
     assert "function recoverIncompleteConversation(b)" in consumer

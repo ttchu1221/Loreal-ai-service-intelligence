@@ -9,6 +9,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- 普通客服工作台和比赛工作台统一使用中文展示情绪、风险等级、紧迫度、意图、服务模式、升级方向、
+  处理状态与执行状态；API contract 中的稳定 enum 值保持不变，避免影响现有 integration。
 - 优化消费者色号咨询话术：统一使用克制、专业的“您”称呼，避免“亲”等带货式表达；LLM 的澄清
   选项必须与页面快捷按钮完全一致，不再自行增加第四个选项、改名或编号。
 - 产品推荐新增中国官网可核验的唇妆类入口和印迹唇釉候选；系统会按当前消息与历史对话中的妆效
@@ -66,6 +68,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- 人工客服会话新增向后兼容的 `agent_empathy_card` 九字段合同，统一呈现当前诉求、消费者原话、情绪、
+  已知/缺失信息、历史承诺、未完成事项、风险判断和推荐动作；普通客服工作台同步升级为与比赛工作台
+  一致的“服务轨迹、共情理解、AI 建议、风险跟踪”四区域，并补齐建议采纳、修改与拒绝反馈入口。
 - `KB-SHADE-001` 支持返回图片型 evidence；回复生成 provider 会按当前问题、对话和图片语义自主
   判断是否附图，backend 仅允许选择本轮已检索的图片且 provider 失败时默认不展示，不使用关键词
   hard code；消费者端会展示选中的可点击缩略图，并对临时素材标记“来源待审核、后续可替换”。

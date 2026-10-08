@@ -7,6 +7,7 @@ from loreal_ai_service_intelligence.config import Settings
 from loreal_ai_service_intelligence.domain.models import (
     AgentAssistantBrief,
     AgentConversationView,
+    AgentEmpathyCard,
     AgentIntakeRequest,
     AgentIntakeResponse,
     AgentSourceContext,
@@ -815,11 +816,35 @@ class ConversationOrchestrator:
             knowledge_version=self.settings.knowledge_version,
             ticket=conversation.ticket,
         )
+        assistant_brief = self._agent_assistant_brief(conversation)
+        current_request = conversation.messages[-1] if conversation.messages else card.surface_issue
         return AgentConversationView(
             handoff_package=package,
             empathy_card=card,
+            agent_empathy_card=AgentEmpathyCard(
+                current_request=current_request,
+                consumer_quote=current_request,
+                emotion=assistant_brief.emotion if assistant_brief else card.emotion or "neutral",
+                known_information=(
+                    assistant_brief.known_facts if assistant_brief else card.confirmed_facts
+                ),
+                missing_information=(
+                    assistant_brief.unknown_fields if assistant_brief else card.missing_information
+                ),
+                historical_promises=(
+                    assistant_brief.historical_promises if assistant_brief else []
+                ),
+                unresolved_items=(assistant_brief.unresolved_items if assistant_brief else []),
+                risk_level=card.risk_level,
+                risk_reasons=card.risk_reasons,
+                recommended_actions=(
+                    assistant_brief.next_actions
+                    if assistant_brief
+                    else [package.suggested_next_step]
+                ),
+            ),
             audit_trail=self.repository.get_audit(conversation_id),
-            assistant_brief=self._agent_assistant_brief(conversation),
+            assistant_brief=assistant_brief,
             risk_tracking=conversation.risk_tracking,
             suggestion_feedback=conversation.suggestion_feedback,
         )

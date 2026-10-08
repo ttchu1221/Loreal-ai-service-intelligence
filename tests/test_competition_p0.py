@@ -582,7 +582,12 @@ def test_tc30_competition_workspace_exposes_three_modes_and_four_regions() -> No
     assert "HUMAN_REQUIRED" in html
     for title in ("服务轨迹", "共情理解", "AI 建议", "风险跟踪"):
         assert title in html
-    assert "SIMULATED 比赛演示" in html
+    assert "模拟数据 · 比赛演示" in html
+    assert "模式：自动回复 / 人工辅助 / 必须人工" in html
+    assert "function label(value)" in html
+    assert "情绪：${label(d.emotion)}" in html
+    assert "紧迫度：${label(d.urgency)}" in html
+    assert "风险等级：${label(d.risk_level)}" in html
     assert 'id="degradation"' in html
 
 

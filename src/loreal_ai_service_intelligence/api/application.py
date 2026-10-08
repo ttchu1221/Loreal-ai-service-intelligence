@@ -753,8 +753,14 @@ opacity:.66;margin-bottom:4px}.handoff-card{align-self:stretch;background:#fff;b
 padding:13px 15px;color:#665b5f}.handoff-card summary{cursor:pointer;font-weight:650;color:#473b40}
 .handoff-card pre{font:12px/1.65 inherit;white-space:pre-wrap;margin:10px 0 0}.notice{align-self:center;
 font-size:11px;color:var(--muted);background:#eee9eb;border-radius:99px;padding:5px 11px}
+.assistant-grid{align-self:stretch;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.assistant-card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:14px;min-width:0}
+.assistant-card h3{font-size:13px;color:#473b40;margin:0 0 8px}.assistant-card pre{font:12px/1.65 inherit;
+white-space:pre-wrap;overflow-wrap:anywhere;margin:0}.assistant-card.risk{border-color:#edc6d2;background:#fffafb}
 .reply-box{background:#fff;border-top:1px solid var(--line);padding:16px 24px}.reply-box label{font-size:11px;
 font-weight:650;color:#6f6267;letter-spacing:.08em}.reply-row{display:flex;gap:10px;align-items:flex-end;margin-top:7px}
+.feedback-row{display:flex;gap:8px;margin-top:9px}.feedback-row button{padding:7px 11px;border-radius:8px;
+background:#f2edef;color:#493e42}.feedback-row button:hover{background:#eadfe3}.feedback-row .reject{color:#932141}
 textarea{flex:1;resize:none;border:1px solid var(--line);border-radius:12px;padding:11px 13px;min-height:68px}
 .primary{background:var(--rose);color:#fff;padding:11px 17px;border-radius:10px}.primary:hover{transform:translateY(-1px)}
 .context{background:#fff;border-left:1px solid var(--line);padding:24px;overflow:auto}.context h3{font-size:13px;
@@ -766,7 +772,8 @@ margin-top:18px}.dot{display:inline-block;width:7px;height:7px;border-radius:50%
 .actions .danger{background:#fff0f3;color:#932141;border:1px solid #f1ccd7}.actions .danger:hover{background:#f9dfe7}
 @media(max-width:950px){body{overflow:auto}.shell{height:auto;min-height:100vh}.workspace{grid-template-columns:260px 1fr}
 .context{grid-column:1/-1;border:0;border-top:1px solid var(--line)}}
-@media(max-width:650px){.workspace{display:block}.queue{max-height:300px}.main{min-height:650px}.bar{padding:0 14px}}
+@media(max-width:650px){.workspace{display:block}.queue{max-height:300px}.main{min-height:650px}.bar{padding:0 14px}
+.assistant-grid{grid-template-columns:1fr}}
 @media(prefers-reduced-motion:reduce){*{transition:none!important}}</style>
 <main class="shell"><header class="bar"><div class="brand"><span class="mark">L</span><div>
 <h1>人工客服工作台</h1><p>Service Intelligence Console</p></div></div><div class="agent">演示客服 · 在线</div></header>
@@ -778,7 +785,10 @@ margin-top:18px}.dot{display:inline-block;width:7px;height:7px;border-radius:50%
 <div class="empty">从左侧队列选择工单<br>查看 AI 与消费者已经沟通的内容</div></div>
 <section class="reply-box"><label for="note">回复消费者</label><div class="reply-row">
 <textarea id="note" rows="2" placeholder="输入清晰、可执行的人工回复……"></textarea>
-<button id="reply" class="primary" onclick="action('reply')" disabled>发送回复</button></div></section></section>
+<button id="reply" class="primary" onclick="action('reply')" disabled>发送回复</button></div>
+<div class="feedback-row" aria-label="AI 建议反馈"><button id="adoptSuggestion" onclick="suggestionFeedback('adopted')" disabled>采纳建议</button>
+<button id="editSuggestion" onclick="suggestionFeedback('edited')" disabled>记录修改</button>
+<button id="rejectSuggestion" class="reject" onclick="suggestionFeedback('rejected')" disabled>拒绝建议</button></div></section></section>
 <aside class="context"><h3>处理动作</h3><div class="hint">人工回复会实时同步到消费者端；最终是否解决由消费者确认。</div>
 <div class="actions"><button id="complete" onclick="ticket('action_completed')" disabled>
 <span class="action-label">✓ 标记动作完成</span><span class="action-help">已完成本次承诺的处理事项</span></button>
@@ -794,7 +804,8 @@ const caseMetaEl=document.getElementById('caseMeta');const caseStatusEl=document
 const replyButton=document.getElementById('reply');const completeButton=document.getElementById('complete');
 const refreshDetailButton=document.getElementById('refreshDetail');const noteInput=document.getElementById('note');
 const closeConversationButton=document.getElementById('closeConversation');
-const syncStatus=document.getElementById('syncStatus');let selected=null;let loading=false;
+const suggestionButtons=['adoptSuggestion','editSuggestion','rejectSuggestion'].map(x=>document.getElementById(x));
+const syncStatus=document.getElementById('syncStatus');let selected=null;let loading=false;let selectedBrief=null;
 async function call(path,options){const r=await fetch(path,options);
 const b=r.status===204?{}:await r.json();
 if(!r.ok)throw new Error(b.detail||`HTTP ${r.status}`);return b;}
@@ -804,6 +815,11 @@ function localTime(value){const normalized=/[zZ]|[+-][0-9][0-9]:[0-9][0-9]$/.tes
 return new Date(normalized).toLocaleString();}
 function statusLabel(value){return {waiting_for_agent:'等待客服',processing:'处理中',agent_replied:'已回复',
 action_completed:'处理完成',resolved:'消费者已确认',reopened:'再次处理中',completed:'已关闭'}[value]||value;}
+function enumLabel(value){return {neutral:'平静',anxious:'焦虑',angry:'愤怒',frustrated:'沮丧',positive:'积极',negative:'消极',
+low:'低',medium:'中',high:'高',consult:'咨询',purchase:'购买咨询',usage:'使用咨询',after_sales:'售后',
+complaint:'投诉',other:'其他',risk_specialist:'风险专员',logistics:'物流专员',open:'待处理',monitoring:'监控中',
+escalated:'已升级',closed:'已关闭',GUIDE:'引导处理',RESOLVE:'直接解决',ASK:'补充信息',HANDOFF:'转人工',
+BLOCK:'安全阻断',proposed:'待执行',executed:'已执行',skipped:'已跳过'}[value]||value;}
 async function load(){if(loading)return;loading=true;try{const b=await call('/v1/agent/events');
 eventsList.replaceChildren();queueCount.textContent=b.length?`(${b.length})`:'';
 b.forEach(x=>{const li=document.createElement('li');const button=document.createElement('button');
@@ -821,36 +837,51 @@ else if(selected&&b.some(x=>x.event_id===selected.event_id))await selectEvent(se
 }catch(e){showAgentError(e);}finally{loading=false;}}
 async function selectEvent(event,reload=true){selected=event;const b=await call(
 `/v1/agent/conversations/${event.conversation_id}`);const p=b.handoff_package;const brief=b.assistant_brief;
+selectedBrief=brief;const empathy=b.agent_empathy_card;
 const attempts=p.attempts.length?p.attempts.map((x,i)=>
-`${i+1}. ${x.recommendation}｜${x.execution_status}｜${x.observation||'无观察记录'}`).join('\\n'):
+`${i+1}. ${x.recommendation}｜${enumLabel(x.execution_status)}｜${x.observation||'无观察记录'}`).join('\\n'):
 '暂无建议执行记录';
 detailPanel.replaceChildren();const notice=document.createElement('div');notice.className='notice';
 notice.textContent=brief?'AI 坐席辅助已就绪':`AI 已交接 · ${p.handoff_reason}`;detailPanel.append(notice);
-if(brief){const assist=document.createElement('details');assist.className='handoff-card';assist.open=true;
-const assistTitle=document.createElement('summary');assistTitle.textContent='AI 服务判断与建议';
-const assistInfo=document.createElement('pre');const evidence=brief.evidence.map(x=>`${x.source}：${x.excerpt}`).join('\\n')||'暂无可引用依据';
-assistInfo.textContent=`意图：${brief.intent}\n情绪：${brief.emotion}\n风险：${brief.risk_level}`+
-`\n升级方向：${brief.escalation_target||'无需升级'}\n\n下一步：\n${brief.next_actions.join('\\n')}`+
-`\n\n依据：\n${evidence}`;assist.append(assistTitle,assistInfo);detailPanel.append(assist);
-if(!noteInput.value.trim())noteInput.value=brief.reply_draft;}
+const grid=document.createElement('section');grid.className='assistant-grid';grid.setAttribute('aria-label','AI 客服辅助四区域');
+function addAssistantCard(title,text,className=''){const card=document.createElement('article');card.className=`assistant-card ${className}`;
+const heading=document.createElement('h3');heading.textContent=title;const info=document.createElement('pre');info.textContent=text;
+card.append(heading,info);grid.append(card);}
+const timeline=brief?.service_timeline.map(x=>`${localTime(x.occurred_at)} · ${x.title}\n${x.detail}`).join('\\n\\n')||'暂无服务轨迹';
+addAssistantCard('① 服务轨迹',timeline);
+addAssistantCard('② 共情理解',`当前诉求：${empathy.current_request}\n诉求类型：${brief?enumLabel(brief.intent):'待判断'}\n消费者原话：${empathy.consumer_quote}\n当前情绪：${enumLabel(empathy.emotion)}\n紧迫度：${brief?enumLabel(brief.urgency):'待判断'}`+
+`\n已知信息：${empathy.known_information.join('；')||'暂无'}\n缺失信息：${empathy.missing_information.join('；')||'暂无'}`+
+`\n历史承诺：${empathy.historical_promises.join('；')||'暂无'}\n未完成事项：${empathy.unresolved_items.join('；')||'暂无'}`);
+const evidence=brief?.evidence.map(x=>`${x.source}：${x.excerpt}`).join('\\n')||'暂无可引用依据';
+addAssistantCard('③ AI 建议',`回复草稿：${brief?.reply_draft||'暂无'}\n推荐动作：${empathy.recommended_actions.join('；')||'暂无'}`+
+`\n升级方向：${brief?.escalation_target?enumLabel(brief.escalation_target):'无需升级'}\n引用依据：${evidence}`);
+addAssistantCard('④ 风险跟踪',`风险等级：${enumLabel(empathy.risk_level)}\n风险原因：${empathy.risk_reasons.join('；')||'无'}`+
+`\n处理状态：${b.risk_tracking?.status?enumLabel(b.risk_tracking.status):'无需跟踪'}\n关闭条件：${b.risk_tracking?.close_condition||'无'}`,'risk');
+detailPanel.append(grid);if(brief&&!noteInput.value.trim())noteInput.value=brief.reply_draft;
 p.transcript.forEach(x=>{const bubble=document.createElement('div');bubble.className=`bubble ${x.role}`;
 const meta=document.createElement('div');meta.className='bubble-meta';meta.textContent=
 `${x.role==='user'?'消费者':x.role==='agent'?'人工客服':'AI 顾问'} · ${localTime(x.created_at)}`;
 const content=document.createElement('div');content.textContent=x.content;bubble.append(meta,content);detailPanel.append(bubble);});
 const card=document.createElement('details');card.className='handoff-card';const summary=document.createElement('summary');
 summary.textContent='查看 AI 交接摘要与处理建议';const info=document.createElement('pre');info.textContent=
-`状态：${p.current_state}\n已确认事实：${p.confirmed_facts.join('\\n')||'暂无'}\n仍缺信息：${p.missing_information.join('\\n')||'暂无'}`+
+`状态：${enumLabel(p.current_state)}\n已确认事实：${p.confirmed_facts.join('\\n')||'暂无'}\n仍缺信息：${p.missing_information.join('\\n')||'暂无'}`+
 `\n建议执行情况：${attempts}\n建议下一步：${p.suggested_next_step}`;card.append(summary,info);detailPanel.append(card);
-if(brief){const timeline=document.createElement('details');timeline.className='handoff-card';
-const timelineTitle=document.createElement('summary');timelineTitle.textContent='查看完整服务轨迹';
-const timelineInfo=document.createElement('pre');timelineInfo.textContent=brief.service_timeline.map(x=>
-`${localTime(x.occurred_at)} · ${x.title}\n${x.detail}`).join('\\n\\n');timeline.append(timelineTitle,timelineInfo);detailPanel.append(timeline);}
 detailPanel.scrollTop=detailPanel.scrollHeight;
 caseTitleEl.textContent=p.summary.length>30?`${p.summary.slice(0,30)}…`:p.summary;
 caseMetaEl.textContent=`会话 ${p.conversation_id}`;caseStatusEl.textContent=statusLabel(p.ticket?.status||event.status);
 [replyButton,completeButton,refreshDetailButton,closeConversationButton].forEach(x=>x.disabled=false);
+suggestionButtons.forEach(x=>x.disabled=!brief);
 if(reload)await load();}
 async function refreshSelected(){if(selected)await selectEvent(selected);}
+async function suggestionFeedback(decision){if(!selected||!selectedBrief)return;let payload={decision};
+if(decision==='adopted'){noteInput.value=selectedBrief.reply_draft;}
+if(decision==='edited'){if(!noteInput.value.trim()){showAgentError(new Error('请先修改回复草稿'));noteInput.focus();return;}
+payload.final_reply=noteInput.value.trim();}
+if(decision==='rejected'){const reason=prompt('请填写拒绝 AI 建议的原因');if(!reason?.trim())return;payload.reason=reason.trim();noteInput.value='';}
+try{suggestionButtons.forEach(x=>x.disabled=true);await call(`/v1/agent/conversations/${selected.conversation_id}/suggestion-feedback`,
+{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)});
+syncStatus.textContent=`已记录：${{adopted:'采纳',edited:'修改',rejected:'拒绝'}[decision]} AI 建议`;
+syncStatus.style.color='';}catch(e){showAgentError(e);}finally{suggestionButtons.forEach(x=>x.disabled=false);}}
 async function action(name){if(name==='reply'&&!noteInput.value.trim()){noteInput.focus();
 showAgentError(new Error('请输入回复内容'));return false;}const button=name==='reply'?replyButton:closeConversationButton;
 button.disabled=true;const originalLabel=button.textContent;button.textContent=name==='reply'?'发送中…':'关闭中…';

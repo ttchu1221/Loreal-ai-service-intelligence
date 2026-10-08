@@ -30,9 +30,9 @@ font-size:12px;white-space:pre-wrap}.degradation.visible{display:block}
 border-radius:8px;padding:7px 10px;cursor:pointer}.empty{padding:30px;color:#817278;text-align:center}.error{color:#a3113e}
 @media(max-width:980px){.grid{grid-template-columns:220px 1fr}.right{grid-column:1/-1;border-left:0;border-top:1px solid #ddd4d7}}
 </style></head><body><header class="top"><div class="brand">L'ORÉAL AI 客服助手</div>
-<div class="mode" id="mode">尚未加载会话</div><div class="sim">SIMULATED 比赛演示</div></header>
+	<div class="mode" id="mode">尚未加载会话</div><div class="sim">模拟数据 · 比赛演示</div></header>
 <main class="grid"><aside class="left"><div class="section"><h2>主演示场景</h2>
-<div class="meta">模式：AUTO_REPLY / AGENT_ASSIST / HUMAN_REQUIRED</div>
+	<div class="meta">模式：自动回复 / 人工辅助 / 必须人工</div>
 <button class="demo" onclick="seed('auto')">TC01 · 产品资料自动回复</button>
 <button class="demo" onclick="seed('refund')">TC06 · 重复进线退款进度</button>
 <button class="demo" onclick="seed('risk')">TC08 · 当前不适强制人工</button></div>
@@ -51,6 +51,13 @@ border-radius:8px;padding:7px 10px;cursor:pointer}.empty{padding:30px;color:#817
 <div class="error" id="error"></div></aside></main><script>
 let current=null;const $=id=>document.getElementById(id);async function api(path,options={}){const response=await fetch(path,options);
 const body=await response.json().catch(()=>({detail:`HTTP ${response.status}`}));if(!response.ok)throw new Error(body.detail||JSON.stringify(body));return body;}
+function label(value){return {AUTO_REPLY:'自动回复',AGENT_ASSIST:'人工辅助',HUMAN_REQUIRED:'必须人工',
+low:'低',medium:'中',high:'高',neutral:'平静',anxious:'焦虑',angry:'愤怒',frustrated:'沮丧',product_info:'产品信息咨询',
+refund_progress:'退款进度',adverse_reaction:'不良反应',consult:'咨询',general_consultation:'一般咨询',usage:'使用咨询',
+after_sales:'售后',logistics:'物流',safety:'安全风险',account_or_payment:'账户或支付风险',complaint:'投诉',MODEL:'模型',
+RETRIEVAL:'知识检索',RECORDING:'运行记录',DEGRADED:'已降级',FAILED:'失败',DRAFT:'草稿',PENDING:'待发送',
+SENT:'已发送',UNKNOWN:'状态未知',CANCELLED:'已取消',SIMULATED:'模拟',REAL:'真实',DETECTED:'已识别',
+ACKNOWLEDGED:'已确认',HANDLING:'处理中',CLOSED:'已关闭'}[value]||value;}
 const now='2026-09-21T08:00:00Z',later='2026-10-21T08:00:00Z';function base(kind){const id=`demo-${kind}-${Date.now()}`;
 const data={snapshot_id:`snapshot-${id}`,case_id:`case-${id}`,conversation_id:id,issue_id:`issue-${id}`,
 customer_id:'demo-customer',current_message_id:`message-${id}`,cutoff_message_seq:1,current_message:'这款产品的规格是什么？',
@@ -69,16 +76,16 @@ body:JSON.stringify(base(kind))});await load();await select(created.conversation
 const queue=$('queue');queue.replaceChildren();sessions.forEach(s=>{const b=document.createElement('button');b.textContent=`${s.decision.risk_level==='high'?'⚠ ':''}${s.snapshot.current_message}`;
 b.onclick=()=>select(s.conversation_id);queue.append(b)});if(!current&&sessions[0])await select(sessions[0].conversation_id);}catch(e){showError(e)}}
 async function select(id){try{current=await api(`/v1/competition/sessions/${id}`);render();}catch(e){showError(e)}}function render(){const s=current,d=s.decision;
-$('mode').textContent=`${d.service_mode} · ${d.mode_reason}`;$('title').textContent=s.snapshot.current_message;$('meta').textContent=
+	$('mode').textContent=`${label(d.service_mode)} · ${d.mode_reason}`;$('title').textContent=s.snapshot.current_message;$('meta').textContent=
 `会话 ${s.conversation_id} · 处理人 ${s.takeover.assigned_agent_id||'未认领'} · ${s.takeover.takeover_locked?'人工锁定':'未锁定'}`;
 const degradation=$('degradation');const failures=s.degradations||[];degradation.textContent=failures.map(x=>
-`⚠ ${x.component} ${x.status}：${x.user_message}（fallback: ${x.fallback_applied}）`).join('\n');degradation.classList.toggle('visible',failures.length>0);
+	`⚠ ${label(x.component)} ${label(x.status)}：${x.user_message}（降级处理：${x.fallback_applied}）`).join('\n');degradation.classList.toggle('visible',failures.length>0);
 const chat=$('chat');chat.replaceChildren();s.snapshot.chat_history.forEach(m=>{const b=document.createElement('div');b.className=`bubble ${m.role==='agent'?'agent':''}`;
 b.textContent=`${m.role==='consumer'?'消费者':'客服'} · ${m.created_at}\n${m.content}`;chat.append(b)});s.messages.forEach(m=>{const b=document.createElement('div');
-b.className='bubble agent';b.textContent=`客服 · ${m.status} · ${m.channel}\n${m.body}`;chat.append(b)});$('trajectory').textContent=d.service_trajectory.map(x=>
-`${x.occurred_at} · ${x.title}\n${x.detail}`).join('\\n\\n')||'无历史轨迹';$('empathy').textContent=`诉求：${d.intent}\n情绪：${d.emotion}\n情绪依据：${d.emotion_evidence.join('、')||'无'}\n紧迫度：${d.urgency}\n风险：${d.risk_type||'无'}\n已知：${d.known_facts.join('；')||'无'}\n未知：${d.missing_information.join('；')||'无'}`;
+	b.className='bubble agent';b.textContent=`客服 · ${label(m.status)} · ${label(m.channel)}\n${m.body}`;chat.append(b)});$('trajectory').textContent=d.service_trajectory.map(x=>
+`${x.occurred_at} · ${x.title}\n${x.detail}`).join('\\n\\n')||'无历史轨迹';$('empathy').textContent=`诉求：${label(d.intent)}\n情绪：${label(d.emotion)}\n情绪依据：${d.emotion_evidence.join('、')||'无'}\n紧迫度：${label(d.urgency)}\n风险类型：${d.risk_type?label(d.risk_type):'无'}\n风险等级：${label(d.risk_level)}\n已知：${d.known_facts.join('；')||'无'}\n未知：${d.missing_information.join('；')||'无'}`;
 $('suggestion').textContent=`草稿：${d.reply_text||'强制人工状态不生成消费者回复'}\n补问：${d.follow_up_question||'无'}\n下一步：${d.next_action}\n依据：${d.evidence.map(x=>x.evidence_id).join('、')||'无'}`;
-$('risk').textContent=s.risk?`记录：${s.risk.risk_record_id}\n状态：${s.risk.status}\n处理人：${s.risk.assigned_agent_id||'未认领'}\n触发原话：${s.risk.trigger_quote}\n关闭依据：${s.risk.close_basis||'无'}`:'当前无本地风险记录';
+	$('risk').textContent=s.risk?`记录：${s.risk.risk_record_id}\n状态：${label(s.risk.status)}\n处理人：${s.risk.assigned_agent_id||'未认领'}\n触发原话：${s.risk.trigger_quote}\n关闭依据：${s.risk.close_basis||'无'}`:'当前无本地风险记录';
 $('draft').value='';$('error').textContent='';}function adopt(){if(!current?.decision.reply_text)return;$('draft').value=current.decision.reply_text;}
 async function reject(){if(!current)return;try{await api(`/v1/competition/sessions/${current.conversation_id}/suggestion-feedback`,{method:'POST',
 headers:{'content-type':'application/json'},body:JSON.stringify({decision_id:current.decision.decision_id,decision:'rejected',actor_id:'demo-agent',
