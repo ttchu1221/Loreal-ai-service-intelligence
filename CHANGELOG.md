@@ -9,6 +9,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- LLM adapter 改为使用持久 `httpx` connection pool；消费者 intent 与回复生成共享同一 provider，
+  application shutdown 时统一释放连接。在不改变 model、prompt、上下文、timeout、retry、校验和
+  fallback 的前提下减少重复 DNS、TCP 与 TLS 建连开销；客服操作完成后也不再重复请求同一详情。
 - 普通客服工作台和比赛工作台统一使用中文展示情绪、风险等级、紧迫度、意图、服务模式、升级方向、
   处理状态与执行状态；API contract 中的稳定 enum 值保持不变，避免影响现有 integration。
 - 优化消费者色号咨询话术：统一使用克制、专业的“您”称呼，避免“亲”等带货式表达；LLM 的澄清

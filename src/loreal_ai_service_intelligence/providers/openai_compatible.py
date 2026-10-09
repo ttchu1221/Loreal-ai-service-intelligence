@@ -8,6 +8,8 @@ from typing import Any
 from urllib.error import URLError
 from urllib.request import Request, urlopen
 
+import httpx
+
 from loreal_ai_service_intelligence.domain.competition import P0ContextSnapshot, P0Decision
 from loreal_ai_service_intelligence.domain.models import (
     ConsumerReplyGeneration,
@@ -34,6 +36,7 @@ class OpenAICompatibleIntentProvider:
         timeout_seconds: float,
         retry_limit: int,
         transport: Transport | None = None,
+        client: httpx.Client | None = None,
     ) -> None:
         if not api_key or not model:
             raise ValueError("LLM_API_KEY and LLM_MODEL are required when LLM is enabled")
@@ -42,6 +45,9 @@ class OpenAICompatibleIntentProvider:
         self.model = model
         self.timeout_seconds = timeout_seconds
         self.retry_limit = retry_limit
+        self._client = client if transport is None else None
+        if transport is None and self._client is None:
+            self._client = httpx.Client()
         self.transport = transport or self._send
 
     def classify(self, text: str) -> IntentResult:
@@ -254,15 +260,29 @@ class OpenAICompatibleIntentProvider:
         for attempt in range(self.retry_limit + 1):
             try:
                 return self.transport(request, self.timeout_seconds)
-            except (TimeoutError, URLError):
+            except (TimeoutError, URLError, httpx.HTTPError):
                 if attempt >= self.retry_limit:
                     raise
         raise RuntimeError("unreachable retry state")
 
-    @staticmethod
-    def _send(request: Request, timeout_seconds: float) -> bytes:
-        with urlopen(request, timeout=timeout_seconds) as response:  # noqa: S310
-            return response.read()
+    def _send(self, request: Request, timeout_seconds: float) -> bytes:
+        if self._client is None:  # pragma: no cover - constructor invariant
+            with urlopen(request, timeout=timeout_seconds) as response:  # noqa: S310
+                return response.read()
+        response = self._client.request(
+            request.get_method(),
+            request.full_url,
+            content=request.data,
+            headers=dict(request.header_items()),
+            timeout=timeout_seconds,
+        )
+        response.raise_for_status()
+        return response.content
+
+    def close(self) -> None:
+        """释放 provider 持有的持久 HTTP 连接。"""
+        if self._client is not None:
+            self._client.close()
 
 
 class OpenAICompatibleCompetitionModelProvider(OpenAICompatibleIntentProvider):

@@ -1,5 +1,6 @@
 import json
 
+import httpx
 import pytest
 
 from loreal_ai_service_intelligence.domain.models import (
@@ -69,6 +70,40 @@ def test_retries_timeout_with_a_bounded_limit() -> None:
 
     assert provider.classify("咨询").intent == "consult"
     assert attempts == 2
+
+
+def test_reuses_injected_http_client_without_changing_request_contract() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {"message": {"content": json.dumps({"intent": "consult", "confidence": 0.9})}}
+                ]
+            },
+        )
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    provider = OpenAICompatibleIntentProvider(
+        api_key="test-secret",
+        base_url="https://llm.example/v1",
+        model="demo-model",
+        timeout_seconds=1,
+        retry_limit=0,
+        client=client,
+    )
+
+    provider.classify("第一次咨询")
+    provider.classify("第二次咨询")
+    provider.close()
+
+    assert len(requests) == 2
+    assert {request.url.path for request in requests} == {"/v1/chat/completions"}
+    assert all(request.headers["authorization"] == "Bearer test-secret" for request in requests)
+    assert client.is_closed is True
 
 
 def test_rejects_output_outside_the_frozen_schema() -> None:

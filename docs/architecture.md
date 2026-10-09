@@ -98,6 +98,11 @@ evidence”；常见句末语气词会先归一化，但不会对任意长句做
 自动注入。它设置明确 timeout 和有限 network retry，并验证 JSON 为冻结的 `IntentResult`；默认
 关闭，未配置 credential 时不会假装为 online model。
 
+同一进程中的消费者 intent 与回复生成共享一个 provider，并由 `httpx.Client` 复用到同一 LLM
+endpoint 的连接；competition provider 也会在自身生命周期内复用连接。application shutdown 会关闭
+这些连接。该优化不改变 model、prompt、temperature、对话上下文、Schema 校验、retry 或 fallback，
+只减少重复 DNS、TCP 和 TLS 建连开销。
+
 每轮安全与意图判断以当前消息为主，历史仅用于补充已确认的选购上下文，避免旧症状永久污染后续
 问题。rule-based 安全 fallback 可识别常见否定、假设、第三方主体和已恢复表达；它只能降低明显
 误报，不能替代 LLM/NLU 的语义判断。附件在文件 provider 接入前会明确说明无法读取并进入人工

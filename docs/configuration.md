@@ -59,6 +59,9 @@ scripts/dev.sh config/production.example
 intent 阶段输出 `intent`、`confidence` 和后端生成的 `source`；回复阶段只输出消费者可见的
 `message`，两个阶段都不能执行状态变化：
 
+Runtime 使用进程级持久 HTTP client 复用 LLM endpoint 连接，并在 application shutdown 时释放；
+该连接复用不会改变请求 payload、模型参数、timeout、retry、输出校验或安全 fallback。
+
 ```dotenv
 LLM_ENABLED=true
 LLM_API_KEY=replace-with-runtime-secret

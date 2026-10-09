@@ -1,6 +1,8 @@
 # ruff: noqa: E501  # 内嵌 workspace HTML/CSS 保持可直接交付的单文件模板。
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from importlib.resources import files
 from typing import Literal, Optional, Union
 
@@ -81,8 +83,13 @@ def create_app(
     competition_operation_recorder: Optional[CompetitionOperationRecorder] = None,
 ) -> FastAPI:
     settings = get_settings()
-    intent_provider = intent_provider or create_intent_provider(settings)
-    response_provider = response_provider or create_response_provider(settings)
+    if intent_provider is None and response_provider is None:
+        shared_conversation_provider = create_intent_provider(settings)
+        intent_provider = shared_conversation_provider
+        response_provider = shared_conversation_provider
+    else:
+        intent_provider = intent_provider or create_intent_provider(settings)
+        response_provider = response_provider or create_response_provider(settings)
     competition_model_provider = competition_model_provider or create_competition_model_provider(
         settings
     )
@@ -99,7 +106,21 @@ def create_app(
         decision_policy,
         response_provider,
     )
-    application = FastAPI(title=settings.app_name, version=__version__)
+
+    @asynccontextmanager
+    async def lifespan(_application: FastAPI) -> AsyncIterator[None]:
+        try:
+            yield
+        finally:
+            closed: set[int] = set()
+            for provider in (intent_provider, response_provider, competition_model_provider):
+                close = getattr(provider, "close", None)
+                if close is not None and id(provider) not in closed:
+                    close()
+                    closed.add(id(provider))
+
+    application = FastAPI(title=settings.app_name, version=__version__, lifespan=lifespan)
+
     application.include_router(
         create_mock_router(
             MockDecisionService(settings.rule_version, settings.knowledge_version),
@@ -888,7 +909,7 @@ button.disabled=true;const originalLabel=button.textContent;button.textContent=n
 try{const b=await call(`/v1/agent/events/${selected.event_id}/actions`,
 {method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(
 {action:name,parameters:{note:noteInput.value}})});if(name==='reply')noteInput.value='';
-await load();await refreshSelected();return true;}catch(e){showAgentError(e);return false;}
+await load();return true;}catch(e){showAgentError(e);return false;}
 finally{button.textContent=originalLabel;if(selected)button.disabled=false;}}
 async function closeConversation(){if(!selected||!confirm('确认本次人工处理已完成并关闭会话？'))return;
 try{if(!await action('close'))return;selected=null;caseTitleEl.textContent='选择一个消费者会话';
@@ -900,7 +921,7 @@ async function ticket(event){try{const b=await call(
 `/v1/agent/conversations/${selected.conversation_id}/ticket/results`,
 {method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(
 {event,note:noteInput.value})});detailPanel.textContent=`Ticket 已更新\n${JSON.stringify(b,null,2)}`;
-await load();await refreshSelected();}catch(e){detailPanel.textContent=e.message;}}
+await load();}catch(e){detailPanel.textContent=e.message;}}
 noteInput.addEventListener('keydown',event=>{if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();
 if(!replyButton.disabled)action('reply');}});
 load();setInterval(load,3000);</script></html>"""
