@@ -47,7 +47,7 @@ class OpenAICompatibleIntentProvider:
         self.retry_limit = retry_limit
         self._client = client if transport is None else None
         if transport is None and self._client is None:
-            self._client = httpx.Client()
+            self._client = httpx.Client(headers={"Accept-Encoding": "identity"})
         self.transport = transport or self._send
 
     def classify(self, text: str) -> IntentResult:

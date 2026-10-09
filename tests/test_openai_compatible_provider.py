@@ -106,6 +106,33 @@ def test_reuses_injected_http_client_without_changing_request_contract() -> None
     assert client.is_closed is True
 
 
+def test_default_http_client_requests_uncompressed_responses(monkeypatch) -> None:
+    observed = {}
+
+    class ClientStub:
+        def __init__(self, **kwargs) -> None:
+            observed.update(kwargs)
+
+        def request(self, *_args, **_kwargs):  # pragma: no cover - construction only
+            raise AssertionError("request should not run")
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr(httpx, "Client", ClientStub)
+
+    provider = OpenAICompatibleIntentProvider(
+        api_key="test-secret",
+        base_url="https://llm.example/v1",
+        model="demo-model",
+        timeout_seconds=1,
+        retry_limit=0,
+    )
+    provider.close()
+
+    assert observed["headers"] == {"Accept-Encoding": "identity"}
+
+
 def test_rejects_output_outside_the_frozen_schema() -> None:
     provider = OpenAICompatibleIntentProvider(
         api_key="test-secret",

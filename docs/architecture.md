@@ -101,7 +101,8 @@ evidence”；常见句末语气词会先归一化，但不会对任意长句做
 同一进程中的消费者 intent 与回复生成共享一个 provider，并由 `httpx.Client` 复用到同一 LLM
 endpoint 的连接；competition provider 也会在自身生命周期内复用连接。application shutdown 会关闭
 这些连接。该优化不改变 model、prompt、temperature、对话上下文、Schema 校验、retry 或 fallback，
-只减少重复 DNS、TCP 和 TLS 建连开销。
+只减少重复 DNS、TCP 和 TLS 建连开销。请求显式使用未压缩响应，以兼容当前 OpenAI-compatible
+endpoint 的持续连接行为；这不会修改请求 payload 或模型生成内容。
 
 每轮安全与意图判断以当前消息为主，历史仅用于补充已确认的选购上下文，避免旧症状永久污染后续
 问题。rule-based 安全 fallback 可识别常见否定、假设、第三方主体和已恢复表达；它只能降低明显
