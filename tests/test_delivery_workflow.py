@@ -14,6 +14,7 @@ def test_pilling_flow_asks_once_then_returns_single_condition_guide() -> None:
 
     assert first["state"] == "ASK"
     assert "skip" in first["available_actions"]
+    assert first["suggested_replies"] == ["护肤后", "防晒后", "上粉底时", "暂时不清楚"]
     second = client.post(
         f"/v1/conversations/{first['conversation_id']}/messages",
         json={"message": "发生在涂粉底时，我已经试过换粉扑"},
@@ -243,6 +244,7 @@ def test_agent_intake_aggregates_context_and_returns_assistant_brief() -> None:
     body = response.json()
     assert body["event"]["status"] == "processing"
     brief = body["conversation"]["assistant_brief"]
+    empathy = body["conversation"]["agent_empathy_card"]
     assert brief["emotion"] == "anxious"
     assert brief["escalation_target"] == "logistics"
     assert {item["source"] for item in brief["service_timeline"]} == {
@@ -252,6 +254,18 @@ def test_agent_intake_aggregates_context_and_returns_assistant_brief() -> None:
     }
     assert "核对关联订单状态" in brief["next_actions"]
     assert brief["reply_draft"]
+    assert empathy == {
+        "current_request": "订单还没收到，我很着急，帮我查一下物流",
+        "consumer_quote": "订单还没收到，我很着急，帮我查一下物流",
+        "emotion": "anxious",
+        "known_information": brief["known_facts"],
+        "missing_information": brief["unknown_fields"],
+        "historical_promises": brief["historical_promises"],
+        "unresolved_items": brief["unresolved_items"],
+        "risk_level": brief["risk_level"],
+        "risk_reasons": brief["risk_reasons"],
+        "recommended_actions": brief["next_actions"],
+    }
     assert (
         client.get("/v1/agent/events").json()[0]["conversation_id"]
         == body["event"]["conversation_id"]
@@ -354,13 +368,30 @@ def test_minimum_workspaces_are_available() -> None:
     assert agent_response.headers["cache-control"] == "no-store"
     assert "L'Oréal 智慧美妆顾问" in consumer
     assert 'aria-label="发送消息"' in consumer
+    assert 'id="suggestions"' in consumer
+    assert "function renderSuggestions(choices=[])" in consumer
+    assert "button.addEventListener('click',()=>chooseReply(text))" in consumer
+    assert "renderSuggestions(b.suggested_replies||[])" in consumer
+    assert "function renderEvidenceMedia(container,evidence=[])" in consumer
+    assert "临时参考图（来源待审核，后续可替换）" in consumer
     assert "setSending(true)" in consumer
     assert "const messagesList=document.getElementById('messages')" in consumer
     assert "messagesList.append(bubble)" in consumer
     assert "messageInput.value=''" in consumer
-    assert "messageInput.value='';setSending(true)" in consumer
+    assert "messageInput.value='';renderSuggestions();setSending(true)" in consumer
     assert "messageInput.value=text;showError(e)" in consumer
     assert 'id="clearButton"' in consumer
+    assert 'id="product"' not in consumer
+    assert "当前产品" not in consumer
+
+    knowledge_media = client.get("/v1/knowledge/KB-SHADE-001/media")
+    assert knowledge_media.status_code == 200
+    assert knowledge_media.headers["content-type"] == "image/jpeg"
+    assert knowledge_media.content.startswith(b"\xff\xd8\xff")
+    assert "演示粉底" not in consumer
+    assert "我的底妆总是搓泥" not in consumer
+    assert 'placeholder="描述你的问题，或输入“转人工”……"></textarea>' in consumer
+    assert "const payload={message:text};" in consumer
     assert "function clearConversation()" in consumer
     assert "localStorage.removeItem('lorealConversationId')" in consumer
     assert "顾问。\\n可以告诉我" in consumer
@@ -370,8 +401,30 @@ def test_minimum_workspaces_are_available() -> None:
     assert "touch-action:pan-y" in consumer
     assert "animation:rise .24s ease-out;flex:0 0 auto" in consumer
     assert "flex:0 0 auto;padding:18px 24px" in consumer
+    assert "① 服务轨迹" in agent
+    assert "② 共情理解" in agent
+    assert "③ AI 建议" in agent
+    assert "④ 风险跟踪" in agent
+    assert "当前诉求：${empathy.current_request}" in agent
+    assert "历史承诺：${empathy.historical_promises.join('；')||'暂无'}" in agent
+    assert "未完成事项：${empathy.unresolved_items.join('；')||'暂无'}" in agent
+    assert 'id="adoptSuggestion"' in agent
+    assert 'id="editSuggestion"' in agent
+    assert 'id="rejectSuggestion"' in agent
+    assert "function suggestionFeedback(decision)" in agent
+    assert "function enumLabel(value)" in agent
+    assert "当前情绪：${enumLabel(empathy.emotion)}" in agent
+    assert "紧迫度：${brief?enumLabel(brief.urgency):'待判断'}" in agent
+    assert "风险等级：${enumLabel(empathy.risk_level)}" in agent
+    assert "状态：${enumLabel(p.current_state)}" in agent
     assert "message.value='发生在涂粉底后" not in consumer
     assert "restoreConversation()" in consumer
+    assert "function recoverIncompleteConversation(b)" in consumer
+    assert "b.transcript.some(x=>x.role==='user')&&!hasReply" in consumer
+    assert "旧版会话没有保存 AI 回复" in consumer
+    assert "type==='system'?'系统提示'" in consumer
+    assert "latestUser" not in consumer
+    assert "messageInput.value=latestUser?.content||''" not in consumer
     assert "if(['HANDOFF','BLOCK'].includes(b.state))startPolling()" in consumer
     assert "历史会话已失效，请重新开始咨询" in consumer
     assert "转人工" in consumer

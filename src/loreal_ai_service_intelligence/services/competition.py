@@ -6,6 +6,8 @@ from uuid import uuid4
 from loreal_ai_service_intelligence.config import Settings
 from loreal_ai_service_intelligence.domain.competition import (
     BusinessActionStatus,
+    DependencyComponent,
+    DependencyHealthStatus,
     HumanHandlingStatus,
     IssueResultStatus,
     LocalRiskStatus,
@@ -16,9 +18,11 @@ from loreal_ai_service_intelligence.domain.competition import (
     P0CorrectionRecord,
     P0CorrectionRequest,
     P0Decision,
+    P0DegradationRecord,
     P0EvidenceReference,
     P0IssueResultRecord,
     P0IssueResultRequest,
+    P0KnowledgeEvidence,
     P0MessageRecord,
     P0RiskRecord,
     P0RiskUpdateRequest,
@@ -32,13 +36,32 @@ from loreal_ai_service_intelligence.domain.competition import (
     ServiceMode,
 )
 from loreal_ai_service_intelligence.infrastructure.repository import StorageRepository, utc_now
+from loreal_ai_service_intelligence.providers.competition import (
+    CompetitionModelProvider,
+    CompetitionOperationRecorder,
+    CompetitionRetrievalProvider,
+)
 
 
 class CompetitionP0Service:
     """Deterministic P0 workflow and permission boundary for the competition demo."""
 
-    _risk_terms = ("泛红", "刺痛", "红肿", "灼痛", "呼吸困难", "不良反应", "就医")
-    _complaint_terms = ("投诉", "曝光", "律师", "起诉")
+    _risk_terms = (
+        "泛红",
+        "发红",
+        "刺痛",
+        "红肿",
+        "起疹",
+        "疹子",
+        "灼痛",
+        "呼吸困难",
+        "过敏",
+        "不良反应",
+        "就医",
+        "医院",
+    )
+    _maternal_safety_terms = ("孕妇", "怀孕", "孕期", "哺乳期", "维A酸", "视黄醇", "水杨酸")
+    _complaint_terms = ("投诉", "曝光", "律师", "起诉", "12315", "消协", "维权")
     _security_terms = (
         "盗号",
         "陌生扣款",
@@ -55,17 +78,34 @@ class CompetitionP0Service:
     _logistics_terms = ("物流", "快递", "运输", "到哪", "没收到")
     _usage_terms = ("怎么用", "使用方法", "步骤", "用法")
     _product_terms = ("规格", "成分", "容量", "保质期", "产品信息")
+    _storage_terms = ("保存", "冷藏", "冰箱", "高温", "避光")
+    _texture_terms = ("拔干", "滋润", "质地", "唇纹", "成膜")
+    _payment_issue_terms = ("未到账", "没到账", "没收到钱", "退款成功", "支付流水")
 
-    def __init__(self, repository: StorageRepository, settings: Settings) -> None:
+    def __init__(
+        self,
+        repository: StorageRepository,
+        settings: Settings,
+        model_provider: CompetitionModelProvider | None = None,
+        retrieval_provider: CompetitionRetrievalProvider | None = None,
+        operation_recorder: CompetitionOperationRecorder | None = None,
+    ) -> None:
         self.repository = repository
         self.settings = settings
+        self.model_provider = model_provider
+        self.retrieval_provider = retrieval_provider
+        self.operation_recorder = operation_recorder
 
     def analyze(self, snapshot: P0ContextSnapshot) -> P0SessionRecord:
         existing = self.repository.get_p0_session(snapshot.conversation_id)
         if existing and existing.snapshot.current_message_id == snapshot.current_message_id:
             return existing
         now = utc_now()
+        snapshot = snapshot.model_copy(deep=True)
+        degradations: list[P0DegradationRecord] = []
+        self._retrieve_evidence(snapshot, degradations, now)
         decision = self._decide(snapshot, now)
+        self._generate_model_reply(snapshot, decision, degradations, now)
         takeover_locked = (
             snapshot.takeover_locked
             or decision.requires_takeover
@@ -111,6 +151,7 @@ class CompetitionP0Service:
             issue_result=result,
             suggestion_feedback=list(existing.suggestion_feedback) if existing else [],
             corrections=list(existing.corrections) if existing else [],
+            degradations=(list(existing.degradations) if existing else []) + degradations,
             audit_trail=list(existing.audit_trail) if existing else [],
             created_at=existing.created_at if existing else now,
             updated_at=now,
@@ -125,14 +166,133 @@ class CompetitionP0Service:
                 "current_message_id": snapshot.current_message_id,
             },
         )
+        self._record_operation(session, now)
         self.repository.save_p0_session(session)
         return session
 
+    def _retrieve_evidence(
+        self,
+        snapshot: P0ContextSnapshot,
+        degradations: list[P0DegradationRecord],
+        now: datetime,
+    ) -> None:
+        if self.retrieval_provider is None:
+            return
+        try:
+            retrieved = [
+                P0KnowledgeEvidence.model_validate(item)
+                for item in self.retrieval_provider.retrieve(snapshot)
+            ]
+            known_ids = {item.evidence_id for item in snapshot.knowledge_evidence}
+            snapshot.knowledge_evidence.extend(
+                item for item in retrieved if item.evidence_id not in known_ids
+            )
+        except Exception:  # provider error is isolated behind the fallback boundary
+            snapshot.source_failures.append("retrieval unavailable")
+            degradations.append(
+                self._degradation(
+                    DependencyComponent.RETRIEVAL,
+                    DependencyHealthStatus.FAILED,
+                    "RETRIEVAL_FAILED",
+                    "知识检索暂时不可用，已停止自动发送并转由人工核对。",
+                    "HUMAN_REQUIRED",
+                    now,
+                )
+            )
+
+    def _generate_model_reply(
+        self,
+        snapshot: P0ContextSnapshot,
+        decision: P0Decision,
+        degradations: list[P0DegradationRecord],
+        now: datetime,
+    ) -> None:
+        if self.model_provider is None or decision.reply_text is None:
+            return
+        deterministic_reply = decision.reply_text
+        try:
+            generated = self.model_provider.generate_reply(snapshot, decision).strip()
+            if not generated or len(generated) > 8000:
+                raise ValueError("model reply is invalid")
+            decision.reply_text = generated
+        except Exception:  # model output and transport are both untrusted
+            decision.reply_text = deterministic_reply
+            degradations.append(
+                self._degradation(
+                    DependencyComponent.MODEL,
+                    DependencyHealthStatus.DEGRADED,
+                    "MODEL_FAILED",
+                    "AI 模型暂时不可用，当前内容由确定性规则生成。",
+                    "DETERMINISTIC_REPLY",
+                    now,
+                )
+            )
+
+    def _record_operation(
+        self,
+        session: P0SessionRecord,
+        now: datetime,
+    ) -> None:
+        if self.operation_recorder is None:
+            return
+        try:
+            self.operation_recorder.record(
+                "competition_analysis_completed",
+                {
+                    "conversation_id": session.conversation_id,
+                    "decision_id": session.decision.decision_id,
+                    "service_mode": session.decision.service_mode.value,
+                    "rule_version": session.decision.rule_version,
+                    "knowledge_version": session.decision.knowledge_version,
+                },
+            )
+        except Exception:  # observability failure must remain visible without losing the session
+            degradation = self._degradation(
+                DependencyComponent.RECORDING,
+                DependencyHealthStatus.DEGRADED,
+                "RECORDING_FAILED",
+                "运行记录暂时写入失败；业务状态已保留，请联系技术人员补查。",
+                "LOCAL_AUDIT_TRAIL",
+                now,
+            )
+            session.degradations.append(degradation)
+            self._audit(
+                session,
+                "operation_recording_failed",
+                {"error_code": degradation.error_code},
+            )
+
+    @staticmethod
+    def _degradation(
+        component: DependencyComponent,
+        status: DependencyHealthStatus,
+        error_code: str,
+        user_message: str,
+        fallback_applied: str,
+        occurred_at: datetime,
+    ) -> P0DegradationRecord:
+        return P0DegradationRecord(
+            component=component,
+            status=status,
+            error_code=error_code,
+            user_message=user_message,
+            fallback_applied=fallback_applied,
+            occurred_at=occurred_at,
+        )
+
     def _decide(self, snapshot: P0ContextSnapshot, now) -> P0Decision:
         text = snapshot.current_message
-        risk_quotes = [term for term in self._risk_terms if term in text]
-        complaint = any(term in text for term in self._complaint_terms)
-        security = any(term in text for term in self._security_terms)
+        consumer_context = self._consumer_context(snapshot)
+        risk_quotes = self._matching_consumer_quotes(
+            snapshot,
+            (*self._risk_terms, *self._maternal_safety_terms),
+        )
+        complaint_quotes = self._matching_consumer_quotes(snapshot, self._complaint_terms)
+        security_quotes = self._matching_consumer_quotes(snapshot, self._security_terms)
+        payment_quotes = self._matching_consumer_quotes(snapshot, self._payment_issue_terms)
+        complaint = bool(complaint_quotes)
+        security = bool(security_quotes)
+        payment_issue = bool(payment_quotes)
         unresolved = snapshot.unresolved_count + int(
             any(term in text for term in self._unresolved_terms)
         )
@@ -154,10 +314,10 @@ class CompetitionP0Service:
         elif snapshot.user_requested_human:
             force_reason = "消费者明确要求人工客服"
         elif risk_quotes:
-            force_reason = f"命中当前安全风险信号：{'、'.join(risk_quotes)}"
+            force_reason = "当前问题上下文包含健康、孕产或成分安全风险"
         elif complaint:
             force_reason = "消费者提出投诉、曝光或法律升级诉求"
-        elif security:
+        elif security or payment_issue:
             force_reason = "涉及账号、支付或隐私安全异常"
         elif ownership_errors:
             force_reason = "数据归属校验失败，禁止展示或自动回复"
@@ -170,7 +330,7 @@ class CompetitionP0Service:
         elif unresolved >= 2:
             force_reason = "同一问题第二次明确未解决"
 
-        intent = self._intent(text)
+        intent = self._intent(text, consumer_context)
         mode = ServiceMode.HUMAN_REQUIRED if force_reason else ServiceMode.AGENT_ASSIST
         reason = force_reason or "非自动白名单或仍需人工核对"
         if force_reason is None:
@@ -216,7 +376,7 @@ class CompetitionP0Service:
         emotion, emotion_evidence = self._emotion(text)
         urgency = (
             "high"
-            if risk_quotes or complaint or security
+            if risk_quotes or complaint or security or payment_issue
             else "medium"
             if emotion != "neutral"
             else "low"
@@ -228,8 +388,17 @@ class CompetitionP0Service:
             else "complaint"
             if complaint
             else "account_or_payment"
-            if security
+            if security or payment_issue
             else None
+        )
+        trigger_quotes = (
+            risk_quotes
+            if risk_type == "safety"
+            else complaint_quotes
+            if risk_type == "complaint"
+            else [*security_quotes, *payment_quotes]
+            if risk_type == "account_or_payment"
+            else []
         )
         return P0Decision(
             decision_id=f"decision_{uuid4().hex}",
@@ -250,7 +419,7 @@ class CompetitionP0Service:
             urgency=urgency,
             risk_type=risk_type,
             risk_level="high" if risk_type else "low",
-            risk_trigger_quotes=risk_quotes,
+            risk_trigger_quotes=trigger_quotes,
             reply_text=draft,
             follow_up_question=self._follow_up(missing)
             if mode == ServiceMode.AGENT_ASSIST
@@ -557,15 +726,45 @@ class CompetitionP0Service:
             ticket_statuses & completed and order_statuses & pending
         )
 
-    def _intent(self, text: str) -> str:
-        if any(term in text for term in self._after_sales_terms):
+    @staticmethod
+    def _consumer_context(snapshot: P0ContextSnapshot) -> str:
+        messages = [item.content for item in snapshot.chat_history if item.role == "consumer"]
+        if snapshot.current_message not in messages:
+            messages.append(snapshot.current_message)
+        return "\n".join(messages)
+
+    @classmethod
+    def _matching_consumer_quotes(
+        cls,
+        snapshot: P0ContextSnapshot,
+        terms: tuple[str, ...],
+    ) -> list[str]:
+        quotes = [
+            item.content
+            for item in snapshot.chat_history
+            if item.role == "consumer" and any(term in item.content for term in terms)
+        ]
+        if any(term in snapshot.current_message for term in terms):
+            quotes.append(snapshot.current_message)
+        return list(dict.fromkeys(quotes))
+
+    def _intent(self, text: str, context: str | None = None) -> str:
+        combined = context or text
+        if any(term in text for term in self._after_sales_terms) or any(
+            term in combined for term in self._payment_issue_terms
+        ):
             return "after_sales"
         if any(term in text for term in self._logistics_terms):
             return "logistics"
         if any(term in text for term in self._usage_terms):
             return "usage"
-        if any(term in text for term in self._product_terms):
+        if any(
+            term in text
+            for term in (*self._product_terms, *self._storage_terms, *self._texture_terms)
+        ):
             return "product_info"
+        if any(term in combined for term in self._after_sales_terms):
+            return "after_sales"
         return "general_consultation"
 
     def _emotion(self, text: str) -> tuple[str, list[str]]:
@@ -719,7 +918,7 @@ class CompetitionP0Service:
             risk_record_id=f"risk_{uuid4().hex}",
             conversation_id=snapshot.conversation_id,
             issue_id=snapshot.issue_id,
-            trigger_quote=snapshot.current_message,
+            trigger_quote=(decision.risk_trigger_quotes or [snapshot.current_message])[0],
             risk_type=decision.risk_type,
             priority=decision.risk_level,
             status=LocalRiskStatus.DETECTED,

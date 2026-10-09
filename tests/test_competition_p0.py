@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from copy import deepcopy
 
 import pytest
@@ -9,6 +10,9 @@ from loreal_ai_service_intelligence.api.application import create_app
 from loreal_ai_service_intelligence.domain.competition import P0ContextSnapshot
 from loreal_ai_service_intelligence.infrastructure.repository import MemoryRepository
 from loreal_ai_service_intelligence.providers.context import InMemoryContextDataProvider
+from loreal_ai_service_intelligence.providers.openai_compatible import (
+    OpenAICompatibleCompetitionModelProvider,
+)
 
 NOW = "2026-09-21T08:00:00Z"
 LATER = "2026-10-21T08:00:00Z"
@@ -66,8 +70,8 @@ def base_snapshot(**overrides):
     return data
 
 
-def make_client(provider=None):
-    return TestClient(create_app(MemoryRepository(), context_provider=provider))
+def make_client(provider=None, **dependencies):
+    return TestClient(create_app(MemoryRepository(), context_provider=provider, **dependencies))
 
 
 def analyze(client: TestClient, snapshot: dict):
@@ -279,6 +283,66 @@ def test_tc16_tc17_complaint_and_security_force_human(message: str) -> None:
     session = analyze(make_client(), base_snapshot(current_message=message))
     assert session["decision"]["service_mode"] == "HUMAN_REQUIRED"
     assert session["decision"]["send_allowed"] is False
+
+
+@pytest.mark.parametrize(
+    ("history_message", "current_message", "risk_type"),
+    [
+        ("用了面膜以后全脸发红，还起了小疹子", "这个产品还能继续用吗", "safety"),
+        ("退款显示成功五天了，银行卡没到账", "截图发你了，别拖", "account_or_payment"),
+        ("刚发现怀孕，前几天还在用", "成分有维A酸或水杨酸吗", "safety"),
+        ("用了精华后红肿刺痛，现在在医院", "不行我就走12315", "safety"),
+    ],
+)
+def test_risk_in_consumer_history_remains_active_for_current_issue(
+    history_message: str,
+    current_message: str,
+    risk_type: str,
+) -> None:
+    snapshot = base_snapshot(
+        current_message=current_message,
+        products=[],
+        knowledge_evidence=[],
+        chat_history=[
+            {
+                "message_id": "history-risk",
+                "message_seq": 1,
+                "role": "consumer",
+                "content": history_message,
+                "created_at": NOW,
+            },
+            {
+                "message_id": "current-risk-follow-up",
+                "message_seq": 2,
+                "role": "consumer",
+                "content": current_message,
+                "created_at": NOW,
+            },
+        ],
+        current_message_id="current-risk-follow-up",
+        cutoff_message_seq=2,
+    )
+
+    session = analyze(make_client(), snapshot)
+
+    assert session["decision"]["service_mode"] == "HUMAN_REQUIRED"
+    assert session["decision"]["risk_type"] == risk_type
+    assert session["decision"]["send_allowed"] is False
+    assert session["risk"]["trigger_quote"] == history_message
+
+
+@pytest.mark.parametrize(
+    "message",
+    ["这个精华需要放冰箱冷藏保存吗", "这支口红会不会拔干，我唇纹有点深"],
+)
+def test_storage_and_texture_questions_are_product_information(message: str) -> None:
+    session = analyze(
+        make_client(),
+        base_snapshot(current_message=message, products=[], knowledge_evidence=[]),
+    )
+
+    assert session["decision"]["intent"] == "product_info"
+    assert session["decision"]["service_mode"] == "AGENT_ASSIST"
 
 
 def test_tc19_provider_missing_is_explicit_and_configured_provider_is_callable() -> None:
@@ -518,4 +582,100 @@ def test_tc30_competition_workspace_exposes_three_modes_and_four_regions() -> No
     assert "HUMAN_REQUIRED" in html
     for title in ("服务轨迹", "共情理解", "AI 建议", "风险跟踪"):
         assert title in html
-    assert "SIMULATED 比赛演示" in html
+    assert "模拟数据 · 比赛演示" in html
+    assert "模式：自动回复 / 人工辅助 / 必须人工" in html
+    assert "function label(value)" in html
+    assert "情绪：${label(d.emotion)}" in html
+    assert "紧迫度：${label(d.urgency)}" in html
+    assert "风险等级：${label(d.risk_level)}" in html
+    assert 'id="degradation"' in html
+
+
+class FailingModelProvider:
+    def generate_reply(self, snapshot, decision):
+        del snapshot, decision
+        raise TimeoutError("provider detail must not leak")
+
+
+class FailingRetrievalProvider:
+    def retrieve(self, snapshot):
+        del snapshot
+        raise TimeoutError("retrieval detail must not leak")
+
+
+class FailingOperationRecorder:
+    def record(self, event_type, payload):
+        del event_type, payload
+        raise RuntimeError("recorder detail must not leak")
+
+
+def test_model_failure_is_visible_and_uses_deterministic_reply() -> None:
+    client = make_client(competition_model_provider=FailingModelProvider())
+    session = analyze(client, base_snapshot())
+
+    assert session["decision"]["service_mode"] == "AUTO_REPLY"
+    assert session["decision"]["reply_text"]
+    assert session["degradations"][-1] == {
+        "component": "MODEL",
+        "status": "DEGRADED",
+        "error_code": "MODEL_FAILED",
+        "user_message": "AI 模型暂时不可用，当前内容由确定性规则生成。",
+        "fallback_applied": "DETERMINISTIC_REPLY",
+        "occurred_at": session["degradations"][-1]["occurred_at"],
+    }
+    assert "provider detail" not in str(session)
+
+
+def test_competition_llm_generates_draft_without_changing_fixed_decision() -> None:
+    observed = {}
+
+    def transport(request, _timeout):
+        observed["payload"] = json.loads(request.data)
+        return json.dumps(
+            {"choices": [{"message": {"content": json.dumps({"message": "已审核的模型回复"})}}]}
+        ).encode()
+
+    provider = OpenAICompatibleCompetitionModelProvider(
+        api_key="test-secret",
+        base_url="https://llm.example/v1",
+        model="demo-model",
+        timeout_seconds=1,
+        retry_limit=0,
+        transport=transport,
+    )
+    session = analyze(make_client(competition_model_provider=provider), base_snapshot())
+
+    assert session["decision"]["reply_text"] == "已审核的模型回复"
+    assert session["decision"]["service_mode"] == "AUTO_REPLY"
+    assert session["decision"]["send_allowed"] is True
+    system_prompt = observed["payload"]["messages"][0]["content"]
+    assert "直接结论 → 简短依据 → 一个下一步建议" in system_prompt
+    assert "不使用“亲”" in system_prompt
+    assert "未确认时明确说“需要核实”" in system_prompt
+    context = json.loads(observed["payload"]["messages"][-1]["content"])
+    assert context["fixed_decision"]["service_mode"] == "AUTO_REPLY"
+    assert context["approved_evidence"][0]["excerpt"] == "演示面霜规格为 50ml。"
+
+
+def test_retrieval_failure_is_visible_and_disables_automatic_send() -> None:
+    client = make_client(competition_retrieval_provider=FailingRetrievalProvider())
+    session = analyze(client, base_snapshot())
+
+    assert session["decision"]["service_mode"] == "HUMAN_REQUIRED"
+    assert session["decision"]["send_allowed"] is False
+    assert session["takeover"]["takeover_locked"] is True
+    assert session["degradations"][-1]["component"] == "RETRIEVAL"
+    assert session["degradations"][-1]["error_code"] == "RETRIEVAL_FAILED"
+    assert "retrieval detail" not in str(session)
+
+
+def test_recording_failure_is_visible_and_preserves_local_audit() -> None:
+    client = make_client(competition_operation_recorder=FailingOperationRecorder())
+    session = analyze(client, base_snapshot())
+
+    assert session["decision"]["service_mode"] == "AUTO_REPLY"
+    assert session["degradations"][-1]["component"] == "RECORDING"
+    assert session["degradations"][-1]["error_code"] == "RECORDING_FAILED"
+    assert session["degradations"][-1]["fallback_applied"] == "LOCAL_AUDIT_TRAIL"
+    assert session["audit_trail"][-1]["event_type"] == "operation_recording_failed"
+    assert "recorder detail" not in str(session)

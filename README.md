@@ -45,18 +45,20 @@ scripts/dev.sh        # terminal 2
 
 ## 界面预览
 
-消费者端提供多轮 AI 咨询、主动转人工、服务进度、人工回复同步和问题结果确认：
+消费者端提供多轮 AI 咨询、主动转人工、服务进度、人工回复同步和问题结果确认；消费者只需描述
+问题，页面不要求手工填写产品，产品上下文由对话、订单或工单识别，缺失时再由 AI 追问：
 
 ![消费者对话工作区](docs/images/consumer-workspace.png)
 
-人工客服端提供待处理队列、双方共享对话、AI 交接摘要、回复和关闭会话操作；关闭后会话移出队列，
-消费者选择“仍需处理”后会重新进入待处理队列：
+人工客服端提供待处理队列、双方共享对话，以及与比赛版一致的服务轨迹、九字段共情卡、AI 建议和
+风险跟踪四区域；客服可采纳、修改或拒绝建议，并执行回复和关闭会话。关闭后会话移出队列，消费者
+选择“仍需处理”后会重新进入待处理队列：
 
 ![人工客服工作台](docs/images/agent-workspace.png)
 
 ## 接入 LLM
 
-真实模型通过 OpenAI-compatible adapter 参与意图理解和安全边界内的上下文话术生成。把以下值写入本地 `.env`，不要写进
+真实模型通过 OpenAI-compatible adapter 参与意图理解、消费者回复和比赛版客服草稿生成。把以下值写入本地 `.env`，不要写进
 `config/*.example`，也不要 commit：
 
 ```dotenv
@@ -77,6 +79,8 @@ timeout 和 retry 直接使用代码默认值。保存后重新运行 `scripts/d
 - 比赛版独立 P0 技术合同：实现 `AUTO_REPLY`、`AGENT_ASSIST`、`HUMAN_REQUIRED` 三模式，
   将消息回执、人工处理、业务动作、问题结果和本地风险拆成独立状态；支持 cutoff 防未来信息泄漏、
   数据归属检查、发送幂等、接管锁、模拟售后和明确解决条件。
+- 比赛版模型、检索和运行记录均通过可注入 provider 接入；失败时在 API 与工作台显示稳定错误码和
+  fallback，分别采用确定性话术、强制人工核对或本地 audit trail，且不会暴露内部异常。
 - 聊天、商品、订单、工单和知识通过 `ContextDataProvider` 接口接入；正式数据未提供时按会话读取
   返回明确 `503`，同时保留完整 snapshot API、Memory Mock adapter 和三条主演示场景。
 - agent-first 进线 API：通过上游 `source_conversation_id` 聚合当前聊天、订单和历史工单，自动形成
@@ -114,6 +118,42 @@ scripts/check.sh
 ```bash
 .venv/bin/python scripts/demo_smoke.py
 ```
+
+将业务验收 TSV 转成 input/expected 隔离的 Eval JSON：
+
+```bash
+.venv/bin/python scripts/convert_eval_cases.py source.txt \
+  data/processed/ai_eval_cases_v2.json
+```
+
+字段、校验规则和数据安全边界见 [Eval 案例数据转换](docs/evaluation-data-conversion.md)。
+
+运行当前 deterministic baseline，并生成逐案例 Eval 报告：
+
+```bash
+.venv/bin/python scripts/run_eval.py data/processed/ai_eval_cases_v2.json \
+  data/processed/ai_eval_report.json --reference-date 2026-09-30
+```
+
+当证据核验发现原标注允许了无法安全自动发送的案例时，先应用只降级、不提权的 review overlay：
+
+```bash
+.venv/bin/python scripts/apply_eval_evidence_review.py \
+  data/processed/ai_eval_cases_v2.json \
+  config/eval_evidence_review_v1.json \
+  data/processed/ai_eval_cases_v2_evidence_reviewed.json
+```
+
+将三产品知识卡、三模式语义库和关键词表转换为可审计 JSON：
+
+```bash
+.venv/bin/python scripts/convert_product_knowledge.py source.xlsx \
+  data/processed/three_product_knowledge_routing_v1.json
+```
+
+转换器只把“已登记、允许自动引用且来源可追踪”的内容写入有效知识；待核验、冲突、缺失和红线内容
+会保留在排除清单中。字段、门禁和 runtime 接入边界见
+[三产品知识与三情景语义库转换](docs/product-knowledge-conversion.md)。
 
 ## 项目结构
 
