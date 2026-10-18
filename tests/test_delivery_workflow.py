@@ -401,10 +401,17 @@ def test_minimum_workspaces_are_available() -> None:
     assert "touch-action:pan-y" in consumer
     assert "animation:rise .24s ease-out;flex:0 0 auto" in consumer
     assert "flex:0 0 auto;padding:18px 24px" in consumer
-    assert "① 服务轨迹" in agent
-    assert "② 共情理解" in agent
+    assert "① 共情理解" in agent
+    assert "② 服务轨迹" in agent
     assert "③ AI 建议" in agent
     assert "④ 风险跟踪" in agent
+    assistant_sections = [
+        agent.index("① 共情理解"),
+        agent.index("② 服务轨迹"),
+        agent.index("③ AI 建议"),
+        agent.index("④ 风险跟踪"),
+    ]
+    assert assistant_sections == sorted(assistant_sections)
     assert "当前诉求：${empathy.current_request}" in agent
     assert "历史承诺：${empathy.historical_promises.join('；')||'暂无'}" in agent
     assert "未完成事项：${empathy.unresolved_items.join('；')||'暂无'}" in agent
