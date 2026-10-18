@@ -448,7 +448,14 @@ def test_minimum_workspaces_are_available() -> None:
     assert ".join('\\n')" in agent
     assert ".join('\n')" not in agent
     assert "function localTime(value)" in agent
-    assert "查看 AI 交接摘要与处理建议" in agent
+    assert "AI 交接摘要与处理建议" in agent
+    assert "card.open=true" in agent
+    assert 'id="conversationToggle"' in agent
+    assert 'aria-controls="detail" aria-expanded="true"' in agent
+    assert "function toggleConversation()" in agent
+    assert "detailPanel.hidden=collapsed" in agent
+    assert "conversationCollapsed.hidden=!collapsed" in agent
+    assert "右侧 AI 会话助手仍保持显示" in agent
     assert "关闭会话" in agent
     assert "async function closeConversation()" in agent
     assert "function statusLabel(value)" in agent
