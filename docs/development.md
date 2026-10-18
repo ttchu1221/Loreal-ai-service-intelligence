@@ -66,9 +66,10 @@ OPEN_BROWSER=false scripts/demo-start.sh
 3. 验证两种转人工路径中的任意一种：
    - 直接发送“我要人工客服”，系统立即自动建单；
    - 提出当前知识无法回答的问题，由 AI 可回答性与安全规则自动判定并建单。
-4. 打开人工客服端 <http://127.0.0.1:8000/workspace/agent>。队列每三秒自动刷新，首个新 Ticket 会
-   自动打开；页面会显示最近同步时间，连接失败时直接显示错误。检查消费者原话、双方已沟通内容、
-   确认事实、尝试记录和转人工原因。
+4. 打开人工客服端 <http://127.0.0.1:8000/workspace/agent>。左侧会话队列可在“处理中”和“待认领”
+   间切换；队列每三秒自动刷新，首个新 Ticket 会自动打开。中央查看完整对话，右侧会话助手检查
+   已知进展、还需核实、风险跟踪、下一步和建议回复；页面会显示最近同步时间，连接失败时直接显示
+   错误。
 5. 人工客服填写回复并提交处理动作。消费者端每两秒同步进度，无需重新创建会话。
    客服队列时间按服务端 UTC 正确转换为浏览器本地时间。人工回复会写入共享 transcript，并以
    “人工客服”消息气泡展示给消费者。客服回复框支持 `Enter` 发送、`Shift+Enter` 换行，空回复不会
@@ -119,8 +120,9 @@ scripts/check.sh
 
 输出最后一行为 `FULL_CHAIN_OK` 时，表示 Mock、ASK/GUIDE、Case、Attempt、feedback、人工建单、
 客服动作、Ticket 结果、洞察和两个 workspace endpoint 已全部走通。
-消费者 workspace 使用对话式布局并实时展示人工服务进度；客服 workspace 使用工单工作台布局，
-在窄屏下会自动折叠为纵向区域。两个页面均为无 frontend dependency 的 Demo 客户端。
+消费者 workspace 使用对话式布局并实时展示人工服务进度；客服 workspace 使用三栏工单工作台
+布局，在中等宽度下右侧助手保持独立面板，窄屏下自动折叠为纵向区域。两个页面均为无 frontend
+dependency 的 Demo 客户端。
 
 `scripts/test.sh` 会把额外 argument 透传给 pytest，例如：
 

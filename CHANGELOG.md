@@ -9,6 +9,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- 人工客服工作台按可编辑原型重构为“会话队列、顾客对话、会话助手”三栏布局；新增处理中/待认领
+  筛选、风险优先提示、已知进展、待核实项、下一步任务和建议回复操作，同时保留完整 transcript、
+  九字段共情卡、风险依据、建议反馈、人工回复及关闭会话能力。
 - LLM adapter 改为使用持久 `httpx` connection pool；消费者 intent 与回复生成共享同一 provider，
   application shutdown 时统一释放连接。在不改变 model、prompt、上下文、timeout、retry、校验和
   fallback 的前提下减少重复 DNS、TCP 与 TLS 建连开销，并通过未压缩响应兼容现有 endpoint；客服

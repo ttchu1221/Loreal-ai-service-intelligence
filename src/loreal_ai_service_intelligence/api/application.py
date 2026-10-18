@@ -11,6 +11,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from pymongo.errors import PyMongoError
 
 from loreal_ai_service_intelligence import __version__
+from loreal_ai_service_intelligence.api.agent_workspace import agent_workspace_html
 from loreal_ai_service_intelligence.api.competition import create_competition_router
 from loreal_ai_service_intelligence.api.competition_workspace import competition_workspace_html
 from loreal_ai_service_intelligence.api.mock import MockDecisionService, create_mock_router
@@ -483,7 +484,7 @@ def create_app(
 
     @application.get("/workspace/agent", response_class=HTMLResponse, tags=["workspace"])
     def agent_workspace() -> HTMLResponse:
-        return HTMLResponse(_agent_workspace_html(), headers={"Cache-Control": "no-store"})
+        return HTMLResponse(agent_workspace_html(), headers={"Cache-Control": "no-store"})
 
     @application.get("/workspace/competition", response_class=HTMLResponse, tags=["workspace"])
     def competition_workspace() -> HTMLResponse:

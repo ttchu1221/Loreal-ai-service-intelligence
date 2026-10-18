@@ -428,7 +428,20 @@ def test_minimum_workspaces_are_available() -> None:
     assert "if(['HANDOFF','BLOCK'].includes(b.state))startPolling()" in consumer
     assert "历史会话已失效，请重新开始咨询" in consumer
     assert "转人工" in consumer
+    assert "欧莱雅 AI 客服助手" in agent
     assert "人工客服工作台" in agent
+    assert "会话队列" in agent
+    assert "处理中" in agent
+    assert "待认领" in agent
+    assert "风险优先 · 同级按等待时长" in agent
+    assert "会话助手" in agent
+    assert "已知进展" in agent
+    assert "还需核实" in agent
+    assert "下一步" in agent
+    assert "可以这样回复" in agent
+    assert "AI自动发送已停用" in agent
+    assert "采用到回复框" in agent
+    assert "重新分析" in agent
     assert "发送回复" in agent
     assert "if(!selected&&b.length)await selectEvent(b[0],false)" in agent
     assert "const eventsList=document.getElementById('events')" in agent
@@ -448,4 +461,4 @@ def test_minimum_workspaces_are_available() -> None:
     assert "同步失败" in agent
     assert "确认已解决" in consumer
     assert "仍需处理" in consumer
-    assert "同步最新状态" in agent
+    assert "队列每 3 秒自动同步" in agent
