@@ -95,6 +95,12 @@ resolved 和 reopened，客服动作完成不能自动等于用户确认解决�
 3. `suggestions`：可编辑回复草稿、下一步动作、升级方向以及字段级 evidence；
 4. `risk_tracking`：风险类型、等级、状态、原因、关闭条件和更新时间。
 
+普通客服会话通过 `agent_empathy_card` 提供稳定的九字段共情卡合同：当前诉求、消费者原话、当前
+情绪、已知信息、缺失信息、历史承诺、未完成事项、风险判断和推荐动作。普通客服工作台与比赛工作台
+统一采用“服务轨迹、共情理解、AI 建议、风险跟踪”四区域；情绪、风险等级、紧迫度、意图、服务模式
+和处理状态在 UI 中显示为中文，但 API 继续返回既有英文 enum 值，以保持 external integration 的
+backward compatibility。
+
 该 Mock 是 deterministic、无持久化和无业务副作用的接口包，不会发送回复、创建 Ticket、退款或
 关闭真实工单。正式 intake 会持久化同类信息；客服通过 `suggestion-feedback` 记录 adopted、edited、
 rejected，通过 `risk` endpoint 更新风险生命周期。高风险关闭必须提供处理说明；所有变化写入 audit。

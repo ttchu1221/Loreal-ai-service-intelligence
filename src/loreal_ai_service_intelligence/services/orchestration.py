@@ -7,6 +7,7 @@ from loreal_ai_service_intelligence.config import Settings
 from loreal_ai_service_intelligence.domain.models import (
     AgentAssistantBrief,
     AgentConversationView,
+    AgentEmpathyCard,
     AgentIntakeRequest,
     AgentIntakeResponse,
     AgentSourceContext,
@@ -16,6 +17,7 @@ from loreal_ai_service_intelligence.domain.models import (
     CaseRecord,
     CaseRevision,
     CaseRevisionRequest,
+    ConsumerReplyGeneration,
     ConsumerResponse,
     ConsumerTicketView,
     ConversationRequest,
@@ -25,6 +27,7 @@ from loreal_ai_service_intelligence.domain.models import (
     EventSummary,
     HandoffPackage,
     Intent,
+    KnowledgeReference,
     RiskLevel,
     RiskStatus,
     RiskTracking,
@@ -242,6 +245,7 @@ class ConversationOrchestrator:
         result_id = f"result_{uuid4().hex}"
         fallback_text, actions = self._consumer_copy(card)
         response_text = fallback_text
+        selected_media_ids: set[str] = set()
         if (
             self.response_provider is not None
             and card.next_state
@@ -250,10 +254,19 @@ class ConversationOrchestrator:
                 ConversationState.GUIDE,
                 ConversationState.RESOLVE,
             }
-            and card.intent_source != "user_decline_handoff_rules"
+            and card.intent_source
+            not in {
+                "user_decline_handoff_rules",
+                "lip_recommendation_preference_rules",
+            }
         ):
             try:
-                response_text = self.response_provider.generate(request, card, existing)
+                generated = self.response_provider.generate(request, card, existing)
+                if isinstance(generated, ConsumerReplyGeneration):
+                    response_text = generated.message
+                    selected_media_ids = set(generated.media_knowledge_ids)
+                elif card.intent_source != "lip_style_clarification_rules":
+                    response_text = generated
             except Exception as error:  # provider 失败不得中断消费者主链路
                 self.repository.add_audit(
                     conversation_id,
@@ -303,19 +316,89 @@ class ConversationOrchestrator:
             result_id=result_id,
             state=card.next_state,
             message=response_text,
-            evidence=(
-                card.knowledge_refs
-                if card.next_state in {ConversationState.RESOLVE, ConversationState.GUIDE}
-                else []
-            ),
+            evidence=self._consumer_evidence(card, selected_media_ids),
             available_actions=actions,
+            suggested_replies=self._suggested_replies(card),
             event_id=event.event_id if event else None,
             event_status=event.status if event else None,
             estimated_response_at=event.estimated_response_at if event else None,
         )
 
     @staticmethod
+    def _consumer_evidence(
+        card: EmpathyCard, selected_media_ids: set[str]
+    ) -> list[KnowledgeReference]:
+        if card.next_state not in {
+            ConversationState.ASK,
+            ConversationState.RESOLVE,
+            ConversationState.GUIDE,
+        }:
+            return []
+        if card.next_state == ConversationState.ASK and not selected_media_ids:
+            return []
+        return [
+            ref
+            if ref.knowledge_id in selected_media_ids
+            else ref.model_copy(
+                update={"image_url": None, "image_alt": None, "media_review_status": None}
+            )
+            for ref in card.knowledge_refs
+        ]
+
+    @staticmethod
+    def _suggested_replies(card: EmpathyCard) -> list[str]:
+        if card.next_state != ConversationState.ASK:
+            return []
+        if "搓泥发生步骤或已经尝试过的方法" in card.missing_information:
+            return ["护肤后", "防晒后", "上粉底时", "暂时不清楚"]
+        if "肤色冷暖调或期望妆效" in card.missing_information:
+            return ["偏冷调", "偏暖调", "中性调", "暂时不清楚"]
+        if "希望了解的产品品类" in card.missing_information:
+            return ["精华类", "水乳/面霜类", "面膜类", "唇妆类", "暂时不确定"]
+        if "期望的唇妆妆效" in card.missing_information:
+            return ["柔雾轻薄", "水光妆效", "暂时不确定"]
+        if "期望的口红风格" in card.missing_information:
+            return ["日常柔和", "浓郁有氛围", "暂时不确定"]
+        if any("产品完整名称" in item for item in card.missing_information):
+            return ["暂时不清楚"]
+        return []
+
+    @staticmethod
     def _consumer_copy(card: EmpathyCard) -> tuple[str, list[str]]:
+        evidence_free_replies = {
+            "evidence_free_rules:greeting": (
+                "在的，你可以直接告诉我遇到的问题，我会先帮你分析，需要时再为你转接人工客服。"
+            ),
+            "evidence_free_rules:gratitude": "不客气。如果还有其他问题，可以继续告诉我。",
+            "evidence_free_rules:acknowledgement": "好的。如果还需要继续处理，请直接告诉我。",
+            "evidence_free_rules:farewell": "好的，再见。之后需要帮助时可以随时回来咨询。",
+            "evidence_free_rules:capability": (
+                "我是智慧美妆顾问，可以协助理解美妆咨询、梳理问题并在需要时转接人工客服。"
+            ),
+            "evidence_free_rules:meta_help": (
+                "你可以直接说遇到的现象、涉及的商品或订单，以及希望解决什么；不确定的信息可以先不填。"
+            ),
+            "evidence_free_rules:clarification": (
+                "可以。请告诉我是哪一句没有理解，我会换一种更简单的方式说明。"
+            ),
+        }
+        if card.intent_source in evidence_free_replies:
+            return evidence_free_replies[card.intent_source], ["reply"]
+        if card.intent_source == "generic_product_guidance_rules":
+            context = " ".join(card.confirmed_facts)
+            if any(term in context for term in ("拔干", "唇纹", "质地")):
+                return (
+                    "暂时无法确认这款具体配方是否拔干。一般来说，雾面妆效比滋润型更容易显唇纹，"
+                    "但实际感受会因唇部状态而不同；可以先少量试涂，觉得偏干时先做好唇部保湿，"
+                    "并在饮水或进食后按需补涂。",
+                    ["feedback", "new_question"],
+                )
+            return (
+                "暂时无法确认这个系列两个色号的实际上唇效果。可以先按商品页的官方色调说明和"
+                "你想要的妆效筛选，并尽量在线下或可靠试色图中确认；我不会只根据色号名称替你"
+                "下绝对结论。",
+                ["feedback", "new_question"],
+            )
         if card.next_state == ConversationState.BLOCK:
             return (
                 "你提到的情况需要谨慎处理。请先停止继续使用相关产品，避免自行叠加其他刺激性产品；"
@@ -327,14 +410,42 @@ class ConversationOrchestrator:
                 return "好的，暂不转人工。请继续描述你希望 AI 帮你解决的具体问题。", ["reply"]
             if "搓泥发生步骤或已经尝试过的方法" in card.missing_information:
                 return (
-                    "为了只调整一个条件，请告诉我搓泥发生在哪一步，以及你已经试过什么方法；不确定也可以跳过。",
+                    "搓泥更接近发生在哪一步？请选择：护肤后、防晒后、上粉底时，或暂时不清楚。",
                     [
                         "reply",
                         "skip",
                         "confirm_handoff",
                     ],
                 )
-            return "为了更准确地给出建议，请告诉我你的肤色冷暖调，或你偏好的妆效。", ["reply"]
+            if any("产品完整名称" in item for item in card.missing_information):
+                return (
+                    "为了确认你问的是哪一款，可以发一下产品完整名称、系列或商品链接；"
+                    "如果手边没有这些信息，也可以直接说“不清楚”，我会按现有信息继续处理。",
+                    ["reply", "skip", "confirm_handoff"],
+                )
+            if "希望了解的产品品类" in card.missing_information:
+                return (
+                    "你更想先了解哪一类？请选择：精华类、水乳/面霜类、面膜类、唇妆类或暂时不确定。",
+                    ["reply"],
+                )
+            if "期望的唇妆妆效" in card.missing_information:
+                return (
+                    "为了按你的需求推荐，你更想要哪种妆效？请选择：柔雾轻薄、水光妆效，"
+                    "或暂时不确定。",
+                    ["reply"],
+                )
+            if "期望的口红风格" in card.missing_information:
+                return (
+                    "按你自述的黄二白，如果只在这两个色彩方向里先选，我会更建议先试 #01 赤茶红："
+                    "茶红方向通常更日常柔和；想要更浓郁、偏秋冬氛围时，再优先试 #05 枫叶红。"
+                    "目前没有对应系列的官方商品页，所以这是按名称给出的试色建议，不是具体 SKU "
+                    "一定显白的保证。你更想要哪种效果？请选择：日常柔和、浓郁有氛围，"
+                    "或暂时不确定。",
+                    ["reply"],
+                )
+            return "你的肤色底调更接近哪一种？请选择：偏冷调、偏暖调、中性调，或暂时不清楚。", [
+                "reply"
+            ]
         if card.next_state == ConversationState.HANDOFF:
             if card.intent_source == "user_handoff_rules":
                 return "已按你的选择转接人工客服，之前的沟通内容会一并同步。", ["view_ticket"]
@@ -346,9 +457,11 @@ class ConversationOrchestrator:
                 return message, [
                     "view_ticket",
                 ]
-            return "当前没有足够的已审核依据来安全回答，现有沟通内容已自动提交给人工客服跟进。", [
-                "view_ticket",
-            ]
+            return (
+                "这个问题需要进一步核实。我已经把您刚才的描述和对话记录同步给人工客服，"
+                "您无需重复说明，客服会继续为您处理。",
+                ["view_ticket"],
+            )
         labels = {
             Intent.USAGE: "使用指引",
             Intent.PURCHASE: "选购指引",
@@ -356,6 +469,38 @@ class ConversationOrchestrator:
         }
         label = labels.get(card.intent, "服务指引")
         evidence_text = " ".join(ref.excerpt for ref in card.knowledge_refs)
+        recommendation_context = " ".join(card.confirmed_facts)
+        if all(term in recommendation_context for term in ("赤茶红", "枫叶红")):
+            if any(term in recommendation_context for term in ("日常", "柔和", "低调", "通勤")):
+                return (
+                    "结合你黄二白、想要日常柔和的需求，我会先试偏暖、低饱和的茶红方向；"
+                    "在这两个名称里可优先试 #01 赤茶红。由于目前没有对应系列的官方商品页，"
+                    "这只是按色彩方向给出的试色顺序，不代表已确认该色号的实际上唇效果；"
+                    "下单前建议在自然光下试色。",
+                    ["feedback", "new_question"],
+                )
+            if any(term in recommendation_context for term in ("浓郁", "氛围", "秋冬", "显眼")):
+                return (
+                    "结合你黄二白、想要浓郁氛围感的需求，我会先试更偏秋冬氛围的枫叶红方向；"
+                    "在这两个名称里可优先试 #05 枫叶红。由于目前没有对应系列的官方商品页，"
+                    "这只是按色彩方向给出的试色顺序，不代表已确认该色号一定显白；"
+                    "下单前建议在自然光下试色。",
+                    ["feedback", "new_question"],
+                )
+        if any(ref.knowledge_id == "KB-LOREAL-CN-LIP-001" for ref in card.knowledge_refs):
+            if any(term in recommendation_context for term in ("雾面", "柔雾", "轻薄")):
+                return (
+                    "按你想要的柔雾轻薄妆效，更匹配的候选是印迹唇釉-柔雾小钢笔 129；"
+                    "中国官网将这款描述为雾感、轻薄。实际色彩和使用感受仍以商品页与实物试色为准。",
+                    ["feedback", "new_question"],
+                )
+            if any(term in recommendation_context for term in ("水光", "光泽")):
+                return (
+                    "按你想要的水光妆效，更匹配的候选是欧莱雅印迹唇釉 129（水光）；"
+                    "推荐依据是中国官网展示的款式名称与水光妆效标识，实际色彩和使用感受仍以"
+                    "商品页与实物试色为准。",
+                    ["feedback", "new_question"],
+                )
         return f"根据已审核的{label}：{evidence_text}", [
             "feedback",
             "new_question",
@@ -671,11 +816,35 @@ class ConversationOrchestrator:
             knowledge_version=self.settings.knowledge_version,
             ticket=conversation.ticket,
         )
+        assistant_brief = self._agent_assistant_brief(conversation)
+        current_request = conversation.messages[-1] if conversation.messages else card.surface_issue
         return AgentConversationView(
             handoff_package=package,
             empathy_card=card,
+            agent_empathy_card=AgentEmpathyCard(
+                current_request=current_request,
+                consumer_quote=current_request,
+                emotion=assistant_brief.emotion if assistant_brief else card.emotion or "neutral",
+                known_information=(
+                    assistant_brief.known_facts if assistant_brief else card.confirmed_facts
+                ),
+                missing_information=(
+                    assistant_brief.unknown_fields if assistant_brief else card.missing_information
+                ),
+                historical_promises=(
+                    assistant_brief.historical_promises if assistant_brief else []
+                ),
+                unresolved_items=(assistant_brief.unresolved_items if assistant_brief else []),
+                risk_level=card.risk_level,
+                risk_reasons=card.risk_reasons,
+                recommended_actions=(
+                    assistant_brief.next_actions
+                    if assistant_brief
+                    else [package.suggested_next_step]
+                ),
+            ),
             audit_trail=self.repository.get_audit(conversation_id),
-            assistant_brief=self._agent_assistant_brief(conversation),
+            assistant_brief=assistant_brief,
             risk_tracking=conversation.risk_tracking,
             suggestion_feedback=conversation.suggestion_feedback,
         )

@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Protocol
 
 from loreal_ai_service_intelligence.domain.models import (
+    ConsumerReplyGeneration,
     ConversationRequest,
     EmpathyCard,
     Intent,
@@ -26,7 +27,7 @@ class ResponseProvider(Protocol):
         request: ConversationRequest,
         card: EmpathyCard,
         existing: StoredConversation | None,
-    ) -> str: ...
+    ) -> str | ConsumerReplyGeneration: ...
 
 
 class KnowledgeProvider(Protocol):

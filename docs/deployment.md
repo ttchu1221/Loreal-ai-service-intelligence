@@ -22,6 +22,9 @@ MongoDB 和 `scripts/dev.sh`；production 中应通过 secret manager 注入 cre
 private endpoint；这些值必须在启动 process 的 runtime environment 中提供。仓库内所有实际
 `*.env` 都被禁止 tracking。
 
+LLM adapter 会在 process 生命周期内复用 HTTP 连接，并在 application shutdown 时关闭。部署时应
+使用正常的 ASGI shutdown 流程，而不是直接强制终止，以便连接和其他资源有序释放。
+
 `/health` 不依赖 MongoDB，因此只能证明 process 可响应。数据库可用性必须通过一次实际业务写入验证。
 
 ## 恢复和回滚

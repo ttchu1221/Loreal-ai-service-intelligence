@@ -11,6 +11,11 @@
 和知识数据通过 `ContextDataProvider` 读取。正式数据 adapter 尚未提供时，按会话读取接口返回明确的
 `503 context data provider is not configured`，不会构造“真实查询成功”。
 
+模型生成、知识检索和运行记录分别位于 `CompetitionModelProvider`、
+`CompetitionRetrievalProvider` 与 `CompetitionOperationRecorder` interface 后。调用失败会在
+session 的 `degradations` 中返回 component、status、稳定 error code、面向操作人员的说明与实际
+fallback；provider 内部异常文本不会返回前端。
+
 ## 模块结构
 
 ```text
@@ -28,6 +33,7 @@
 
 - `domain/competition.py`：输入快照、输出决策和六类独立状态；
 - `providers/context.py`：真实数据待接入接口、未配置 adapter 和内存 Mock adapter；
+- `providers/competition.py`：比赛版模型、检索和运行记录 interface；
 - `services/competition.py`：R01 至 R03、发送门禁、接管、风险、动作和问题结果；
 - `api/competition.py`：HTTP contract 和 error mapping；
 - `api/competition_workspace.py`：三栏比赛版工作台。
@@ -57,11 +63,16 @@ adapter 只能读取和映射快照，不得把 credential 放入模型输入或
 
 路由优先级固定为：
 
-1. `HUMAN_REQUIRED`：当前风险、就医、明确人工、投诉/法律升级、账号支付或隐私异常、数据归属失败、
+1. `HUMAN_REQUIRED`：当前问题上下文中的不良反应、孕产/成分安全、就医、明确人工、投诉/监管升级、
+   退款到账异常、账号支付或隐私异常、数据归属失败、
    同时点关键冲突、工具失败、证据失效、第二次明确未解决；
 2. `AGENT_ASSIST`：普通售后、第一次明确未解决、不满、缺字段、多订单、附件人工查看，以及不在自动
    白名单内的低风险咨询；
 3. `AUTO_REPLY`：仅 W01 至 W04 且商品/订单归属、知识、有效期、消息版本和接管锁全部通过。
+
+风险判断仅使用 cutoff 内的消费者原话，不使用客服复述；同一问题中的历史风险会持续到人工明确处置，
+避免消费者后续只问“还能继续用吗”时丢失前文的不良反应。保存方式和质地问题归入
+`product_info`，但仍必须有正式商品与有效知识 evidence 才允许自动发送。
 
 服务模式不能代替其他状态：
 
@@ -75,6 +86,18 @@ adapter 只能读取和映射快照，不得把 credential 放入模型输入或
 
 接管锁一旦由强制人工、人工认领、发送失败或 UNKNOWN 设置，本会话重新分析和刷新不会解除。比赛版
 不提供自动解锁接口。
+
+## 可见降级
+
+| 组件 | 失败行为 | 可见 fallback |
+| --- | --- | --- |
+| `MODEL` | 拒绝非法输出或捕获调用失败，不允许模型修改状态和门禁 | 保留确定性话术，记录 `MODEL_FAILED` |
+| `RETRIEVAL` | 将检索标记为数据源失败并禁止自动发送 | 转为 `HUMAN_REQUIRED`，记录 `RETRIEVAL_FAILED` |
+| `RECORDING` | 外部运行记录失败，但不丢弃已形成的业务会话 | 写入本地 audit trail，记录 `RECORDING_FAILED` |
+| `STORAGE` | MongoDB 读写失败 | API 返回 `503 database temporarily unavailable`，不返回伪成功 |
+
+工作台会在会话标题下直接显示降级组件、状态和 fallback。自动化测试使用故障 provider 注入覆盖上述
+前三条路径，且验证内部异常信息不会泄漏。
 
 ## API
 

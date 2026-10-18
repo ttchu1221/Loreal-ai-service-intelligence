@@ -1,0 +1,62 @@
+{
+  "knowledge_id": "KB-LIPSTICK-SELECTION-OFFICIAL-ZH-001",
+  "title": "巴黎欧莱雅官方口红选色与使用指南（中文知识摘要）",
+  "language": "zh-CN",
+  "source_language": "en-US",
+  "source_market": "美国",
+  "publisher": "L'Oréal Paris USA",
+  "source_url": "https://www.lorealparisusa.com/beauty-magazine/makeup/lip-makeup/how-to-apply-lipstick",
+  "source_published_at": "2024-03-22",
+  "verified_at": "2026-10-01",
+  "supporting_media": {
+    "path": "kb-shade-001-reference.jpg",
+    "public_url": "/v1/knowledge/KB-SHADE-001/media",
+    "alt": "口红颜色方向与冷白皮、冷黄皮、黄黑皮、暖黄皮分类参考图",
+    "review_status": "pending",
+    "source_type": "user_provided_temporary_reference",
+    "usage_boundary": "仅供演示图片展示，不作为品牌官方色号、具体 SKU 或个人适配结论的证据；取得正式审核素材后替换。"
+  },
+  "summary": "选择口红时应同时考虑肤色明暗、冷暖底调、整体妆容和期望妆效。暖底色通常可先尝试暖调唇色，冷底色通常可先尝试冷调唇色；中性底色可跨冷暖尝试，但仍要避免与自身肤色明暗反差不合预期。强调眼妆时可选择相对克制的唇色，想突出唇妆时可选择更明亮或鲜明的颜色。哑光更偏醒目利落，自然妆效可优先考虑缎光方向。以上均为选色起点，不是个人适配保证，最终应结合原生唇色并在自然光下试色。",
+  "knowledge_points": [
+    {
+      "topic": "肤色与底调",
+      "content": "肤色明暗与冷暖底调需要同时考虑；两者不是同一个维度。"
+    },
+    {
+      "topic": "暖底色",
+      "content": "暖底色通常可优先尝试暖调口红。"
+    },
+    {
+      "topic": "冷底色",
+      "content": "冷底色通常可优先尝试冷调口红。"
+    },
+    {
+      "topic": "中性底色",
+      "content": "中性底色可尝试冷暖两类颜色，同时留意口红相对自身肤色是否过浅或过深。"
+    },
+    {
+      "topic": "整体妆容",
+      "content": "眼妆已经较强时，唇色可相对克制；想突出唇妆时，可选择更明亮、鲜明的颜色。"
+    },
+    {
+      "topic": "妆效",
+      "content": "哑光方向更适合醒目利落的唇妆，自然妆效可优先考虑缎光方向。"
+    },
+    {
+      "topic": "上妆准备",
+      "content": "上妆前可温和处理唇部干燥起皮并做好日常保湿；唇线颜色和妆效宜与口红接近。"
+    }
+  ],
+  "answering_rules": [
+    "先复用消费者已说明的肤色明暗、底调、原生唇色、场景和妆效偏好。",
+    "条件足够时给出一个优先试色方向，并说明匹配的是哪个条件。",
+    "条件不足时仍可给出有边界的初步建议，再只确认一个能改变选择结果的变量。",
+    "结尾提醒自然光试色；不得把通用方向表述成个人适配保证。"
+  ],
+  "prohibited_inferences": [
+    "不得据此证明中国大陆具体 SKU、色号名称、价格、库存或配方。",
+    "不得承诺显白、不拔干、持妆时长或适合所有同类肤色。",
+    "不得把美国市场文章中的产品直接映射为中国大陆在售商品。",
+    "不得替代具体商品页、实物试色或消费者个人体验。"
+  ]
+}

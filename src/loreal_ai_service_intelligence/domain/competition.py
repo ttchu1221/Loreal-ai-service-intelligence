@@ -51,6 +51,17 @@ class LocalRiskStatus(str, Enum):
     CLOSED = "CLOSED"
 
 
+class DependencyComponent(str, Enum):
+    MODEL = "MODEL"
+    RETRIEVAL = "RETRIEVAL"
+    RECORDING = "RECORDING"
+
+
+class DependencyHealthStatus(str, Enum):
+    DEGRADED = "DEGRADED"
+    FAILED = "FAILED"
+
+
 class P0ChatMessage(BaseModel):
     message_id: str = Field(min_length=1, max_length=100)
     message_seq: int = Field(ge=1)
@@ -359,6 +370,15 @@ class P0CorrectionRecord(BaseModel):
     created_at: datetime
 
 
+class P0DegradationRecord(BaseModel):
+    component: DependencyComponent
+    status: DependencyHealthStatus
+    error_code: str
+    user_message: str
+    fallback_applied: str
+    occurred_at: datetime
+
+
 class P0SessionRecord(BaseModel):
     conversation_id: str
     issue_id: str
@@ -371,6 +391,7 @@ class P0SessionRecord(BaseModel):
     issue_result: P0IssueResultRecord
     suggestion_feedback: list[P0SuggestionFeedbackRecord] = Field(default_factory=list)
     corrections: list[P0CorrectionRecord] = Field(default_factory=list)
+    degradations: list[P0DegradationRecord] = Field(default_factory=list)
     audit_trail: list[dict[str, object]] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
