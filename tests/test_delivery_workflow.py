@@ -425,6 +425,9 @@ def test_minimum_workspaces_are_available() -> None:
     assert "当前情绪：${enumLabel(empathy.emotion)}" in agent
     assert "紧迫度：${brief?enumLabel(brief.urgency):'待判断'}" in agent
     assert "风险等级：${enumLabel(empathy.risk_level)}" in agent
+    assert "const handlingMode=p.event?.priority>=100?'必须人工'" in agent
+    assert "处理模式：${handlingMode} · 原因：${p.handoff_reason}" in agent
+    assert "处理模式：${handlingMode} · 会话 ${p.conversation_id}" in agent
     assert "状态：${enumLabel(p.current_state)}" in agent
     assert "message.value='发生在涂粉底后" not in consumer
     assert "restoreConversation()" in consumer
