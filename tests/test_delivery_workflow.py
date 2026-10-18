@@ -420,6 +420,8 @@ def test_minimum_workspaces_are_available() -> None:
     assert 'id="rejectSuggestion"' in agent
     assert "function suggestionFeedback(decision)" in agent
     assert "function enumLabel(value)" in agent
+    assert "localizedReason=x.reason.replace" in agent
+    assert "value=>enumLabel(value)" in agent
     assert "当前情绪：${enumLabel(empathy.emotion)}" in agent
     assert "紧迫度：${brief?enumLabel(brief.urgency):'待判断'}" in agent
     assert "风险等级：${enumLabel(empathy.risk_level)}" in agent
@@ -481,3 +483,8 @@ def test_minimum_workspaces_are_available() -> None:
     assert "确认已解决" in consumer
     assert "仍需处理" in consumer
     assert "队列每 3 秒自动同步" in agent
+    assert "grid-template-columns:300px minmax(500px,1fr) minmax(400px,480px)" in agent
+    assert ".bubble{max-width:72%;padding:13px 16px" in agent
+    assert ".composer{margin:0 24px 20px" in agent
+    assert ".assistant{background:#fff;scrollbar-gutter:stable}" in agent
+    assert "@media(prefers-reduced-motion:reduce)" in agent
