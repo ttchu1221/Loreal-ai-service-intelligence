@@ -454,6 +454,8 @@ def test_minimum_workspaces_are_available() -> None:
     assert "function statusLabel(value)" in agent
     assert "event.key==='Enter'&&!event.shiftKey" in agent
     assert "发送中…" in agent
+    assert ".conversation{min-width:0;min-height:0" in agent
+    assert ".transcript{min-height:0;flex:1;overflow:auto" in agent
     assert "const preserveScroll=!reload" in agent
     scroll_restore = "preserveScroll?previousScrollTop:detailPanel.scrollHeight"
     assert f"detailPanel.scrollTop={scroll_restore}" in agent
