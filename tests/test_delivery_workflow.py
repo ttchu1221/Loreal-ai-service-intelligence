@@ -454,6 +454,9 @@ def test_minimum_workspaces_are_available() -> None:
     assert "function statusLabel(value)" in agent
     assert "event.key==='Enter'&&!event.shiftKey" in agent
     assert "发送中…" in agent
+    assert "const preserveScroll=!reload" in agent
+    scroll_restore = "preserveScroll?previousScrollTop:detailPanel.scrollHeight"
+    assert f"detailPanel.scrollTop={scroll_restore}" in agent
     assert ">已核对用户使用步骤" not in agent
     assert "await selectEvent(selected,false)" in agent
     assert "人工客服 · 刚刚" in consumer
